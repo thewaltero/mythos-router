@@ -1,0 +1,39 @@
+{
+  "name": "mythos-router",
+  "version": "1.0.0",
+  "description": "Capybara-tier CLI router — Adaptive Thinking + Strict Write Discipline + Self-Healing Memory",
+  "type": "module",
+  "bin": {
+    "mythos": "./bin/mythos.js"
+  },
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "build": "tsc",
+    "start": "node dist/cli.js",
+    "chat": "tsx src/cli.ts chat",
+    "verify": "tsx src/cli.ts verify",
+    "dream": "tsx src/cli.ts dream"
+  },
+  "keywords": [
+    "claude",
+    "opus",
+    "capybara",
+    "mythos",
+    "adaptive-thinking",
+    "cli",
+    "agent"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.80.0",
+    "commander": "^14.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
