@@ -118,3 +118,37 @@ export function info(text: string): void {
 export function thinking(text: string): void {
   console.log(`${c.dim}${c.italic}💭 ${text}${c.reset}`);
 }
+
+// ── Dry-Run / Verbose Badges ─────────────────────────────────
+export function dryRunBadge(): string {
+  return `${c.bgYellow}${c.black}${c.bold} DRY-RUN ${c.reset}`;
+}
+
+export function verboseBadge(): string {
+  return `${c.bgBlue}${c.white}${c.bold} VERBOSE ${c.reset}`;
+}
+
+// ── Progress Bar ─────────────────────────────────────────────
+export function progressBar(percent: number, width = 20): string {
+  const clamped = Math.max(0, Math.min(100, percent));
+  const filled = Math.round((clamped / 100) * width);
+  const empty = width - filled;
+  return `[${'█'.repeat(filled)}${'░'.repeat(empty)}]`;
+}
+
+// ── Interactive Y/n Confirm Prompt ───────────────────────────
+import * as readline from 'node:readline';
+
+export function confirmPrompt(message: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    rl.question(`${message} ${c.dim}[Y/n]${c.reset} `, (answer) => {
+      rl.close();
+      const trimmed = answer.trim().toLowerCase();
+      resolve(trimmed === '' || trimmed === 'y' || trimmed === 'yes');
+    });
+  });
+}

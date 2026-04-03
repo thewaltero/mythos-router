@@ -8,11 +8,15 @@ import { resolve, relative, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { readMemory, initMemory, appendEntry, getMemoryPath } from '../memory.js';
 import { DEFAULT_IGNORE_PATTERNS, MYTHOSIGNORE_FILE } from '../config.js';
-import { c, heading, success, warn, error, info, hr, timestamp } from '../utils.js';
+import { c, heading, success, warn, error, info, hr, timestamp, dryRunBadge } from '../utils.js';
 
 // ── Verify Command ───────────────────────────────────────────
-export async function verifyCommand(): Promise<void> {
+export async function verifyCommand(options: { dryRun?: boolean } = {}): Promise<void> {
+  const dryRun = options.dryRun === true;
   console.log(heading('SWD Verify — Codebase × Memory Sync'));
+  if (dryRun) {
+    console.log(`  ${dryRunBadge()} ${c.dim}Memory writes will be previewed, not executed.${c.reset}\n`);
+  }
 
   const cwd = process.cwd();
   initMemory();
@@ -129,6 +133,7 @@ export async function verifyCommand(): Promise<void> {
   appendEntry(
     `verify: scanned ${files.length} files`,
     `✅ ${verified} ok, ⚠️ ${drifted} drift, ❌ ${missing} missing`,
+    dryRun,
   );
 
   if (drifted > 0 || missing > 0) {

@@ -6,7 +6,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { MEMORY_FILE, MEMORY_MAX_LINES } from './config.js';
-import { timestamp, c, info, success, warn } from './utils.js';
+import { timestamp, c, info, success, warn, dryRunBadge } from './utils.js';
 
 // ── Types ────────────────────────────────────────────────────
 export interface MemoryEntry {
@@ -36,13 +36,19 @@ export function initMemory(): void {
 }
 
 // ── Append a single entry ────────────────────────────────────
-export function appendEntry(action: string, result: string): void {
+export function appendEntry(action: string, result: string, dryRun = false): void {
   initMemory();
   const path = getMemoryPath();
   const ts = timestamp();
-  const line = `| ${ts} | ${sanitize(action)} | ${sanitize(result)} |\n`;
+  const line = `| ${ts} | ${sanitize(action)} | ${sanitize(result)} |`;
+
+  if (dryRun) {
+    console.log(`${dryRunBadge()} ${c.dim}Would append to MEMORY.md:${c.reset} ${c.cyan}${sanitize(action)}${c.reset} → ${c.dim}${sanitize(result)}${c.reset}`);
+    return;
+  }
+
   const content = readFileSync(path, 'utf-8');
-  writeFileSync(path, content + line, 'utf-8');
+  writeFileSync(path, content + line + '\n', 'utf-8');
 }
 
 // ── Read all entries ─────────────────────────────────────────
@@ -95,6 +101,7 @@ export function needsDream(): boolean {
 export function writeCompressedMemory(
   summary: string,
   recentEntries: MemoryEntry[],
+  dryRun = false,
 ): void {
   const path = getMemoryPath();
   const ts = timestamp();
@@ -112,6 +119,13 @@ export function writeCompressedMemory(
 
   for (const entry of recentEntries) {
     content += `| ${entry.timestamp} | ${entry.action} | ${entry.result} |\n`;
+  }
+
+  if (dryRun) {
+    console.log(`${dryRunBadge()} ${c.dim}Would compress MEMORY.md:${c.reset}`);
+    console.log(`${c.dim}  Summary: ${summary.slice(0, 120)}...${c.reset}`);
+    console.log(`${c.dim}  Keeping ${recentEntries.length} recent entries${c.reset}`);
+    return;
   }
 
   writeFileSync(path, content, 'utf-8');

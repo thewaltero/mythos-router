@@ -52,6 +52,9 @@ Zero slop. Zero hallucinated state. Full adaptive thinking.
 | 💤 **Self-Healing Memory** | `MEMORY.md` logs every action; auto-compresses via "Dream" |
 | ⟲ **Correction Turns** | Model gets 2 retries to match filesystem reality, then yields |
 | 📋 **Drift Detection** | `verify` command syncs codebase state with memory |
+| 💰 **Token Limiter** | Budget cap with graceful save — progress saved to MEMORY.md, never lose work |
+| 🔍 **Dry-Run Mode** | Preview every file operation before it executes — full transparency |
+| 📊 **Verbose Tracing** | See exactly what the AI is parsing, thinking, and verifying |
 | 🚀 **Zero Build** | Runs directly via `tsx` — no compile step in dev |
 
 ---
@@ -97,17 +100,65 @@ npm run chat
 mythos chat                  # Full power (high effort)
 mythos chat --effort low     # Budget mode
 mythos chat --effort medium  # Balanced
+mythos chat --dry-run        # Preview all file changes before executing
+mythos chat --verbose        # See full SWD traces and thinking
+mythos chat --dry-run --verbose  # Maximum transparency
+```
+
+#### 💰 Financial Safety — Never Burn Money Again
+
+```bash
+mythos chat                           # Default: 500K tokens, 25 turns
+mythos chat --max-tokens 100000       # Cap at 100K tokens
+mythos chat --max-turns 10            # Cap at 10 turns
+mythos chat --max-tokens 50000 --max-turns 5  # Tight budget
+mythos chat --no-budget               # Expert mode (no limits)
+```
+
+The budget limiter tracks every token, turn, and estimated cost in real-time:
+
+```
+budget: [████████░░░░░░░░░░░░] 78,342/500,000 tokens · [██████░░░░] 12/25 turns · ~$1.2340 · 4m 32s
+```
+
+At 80%, you get a yellow warning. At 100%, the session performs a **graceful save** — current progress is written to `MEMORY.md` so you can resume context in your next session. No work lost. Use `--no-budget` to disable (at your own risk).
+
+#### 🔍 Dry-Run Mode — The Trust Builder
+
+```bash
+mythos chat --dry-run
+```
+
+In dry-run mode, every file operation is previewed before execution:
+
+```
+ DRY-RUN  ── File Action Preview ──
+  2 file action(s) detected. Review each:
+
+  1/2 MODIFY src/index.ts
+  Description: Change 'axios' to 'fetch'
+  Current state: 1,832 bytes, hash: 7a3f2c1e...
+   DRY-RUN  Accept MODIFY on src/index.ts? [Y/n] y
+  ✔ Accepted: MODIFY src/index.ts
+
+  2/2 CREATE src/utils.ts
+  Description: Add helper utilities
+  Current state: does not exist
+   DRY-RUN  Accept CREATE on src/utils.ts? [Y/n] n
+  ⚠ Rejected: CREATE src/utils.ts
 ```
 
 In-session commands:
-- `/exit` — End session
+- `/exit` — End session (shows final budget summary)
 - `/memory` — Show memory status
+- `/budget` — Show current budget consumption
 - `/clear` — Clear conversation (memory persists)
 
 ### `mythos verify` — Zero-Drift Codebase Scan
 
 ```bash
-mythos verify
+mythos verify              # Scan and log results to MEMORY.md
+mythos verify --dry-run    # Scan without writing to MEMORY.md
 ```
 
 Scans every file in your project and cross-references against `MEMORY.md`:
@@ -118,8 +169,9 @@ Scans every file in your project and cross-references against `MEMORY.md`:
 ### `mythos dream` — Memory Compression
 
 ```bash
-mythos dream          # Auto-compress when needed
-mythos dream --force  # Force compression
+mythos dream              # Auto-compress when needed
+mythos dream --force      # Force compression
+mythos dream --dry-run    # Preview without writing
 ```
 
 When `MEMORY.md` exceeds 100 entries, older logs are compressed into a summary block using Claude (low effort, minimal token burn). Recent entries are preserved intact.
@@ -132,15 +184,16 @@ When `MEMORY.md` exceeds 100 entries, older logs are compressed into a summary b
 mythos-router/
 ├── src/
 │   ├── cli.ts           # Commander.js entry point
-│   ├── config.ts        # Capybara system prompt + constants
+│   ├── config.ts        # Capybara system prompt + constants + budget defaults
 │   ├── client.ts        # Anthropic SDK (adaptive thinking)
-│   ├── swd.ts           # Strict Write Discipline engine
-│   ├── memory.ts        # MEMORY.md self-healing manager
-│   ├── utils.ts         # Terminal formatting (zero-dep)
+│   ├── budget.ts        # Session budget limiter (token cap, turn cap)
+│   ├── swd.ts           # Strict Write Discipline + dry-run preview
+│   ├── memory.ts        # MEMORY.md self-healing manager (dry-run aware)
+│   ├── utils.ts         # Terminal formatting, badges, prompts (zero-dep)
 │   └── commands/
-│       ├── chat.ts      # Interactive REPL
-│       ├── verify.ts    # Codebase ↔ Memory scanner
-│       └── dream.ts     # Memory compression
+│       ├── chat.ts      # Interactive REPL (budget + dry-run + verbose)
+│       ├── verify.ts    # Codebase ↔ Memory scanner (dry-run aware)
+│       └── dream.ts     # Memory compression (dry-run aware)
 ├── .mythosignore        # SWD scan exclusions
 ├── MEMORY.md            # Auto-generated agentic memory
 └── AGENTS.md            # Project conventions
@@ -212,7 +265,16 @@ The model is instructed to emit machine-readable delimiters around every file op
 
 ---
 
-## Token Usage
+## Token Usage & Budget
+
+### Opus 4.6 Pricing (as of 2026-04)
+
+| Rate | USD |
+|------|-----|
+| Input tokens | $15.00 / 1M tokens |
+| Output tokens | $75.00 / 1M tokens |
+
+> Pricing constants live in `src/config.ts`. When Anthropic updates rates, change two lines — no budget math to refactor.
 
 | Mode | Typical Cost Per Turn |
 |------|----------------------|
@@ -221,7 +283,26 @@ The model is instructed to emit machine-readable delimiters around every file op
 | `--effort low` | Minimal thinking — quick answers |
 | `dream` | Low effort summarization (~500 tokens) |
 
-Token counts are displayed after every chat response.
+| Budget Setting | Default |
+|---------------|--------|
+| `--max-tokens` | 500,000 per session |
+| `--max-turns` | 25 per session |
+| Warning threshold | 80% consumption |
+| `--no-budget` | Disables all limits |
+
+### Graceful Save
+
+When the budget is reached, mythos doesn't just kill your session — it performs a **graceful save**:
+
+```
+⏸ BUDGET REACHED — Graceful Save
+  498,231 tokens consumed across 25 turns (~$7.4200).
+  Progress saved to MEMORY.md. Resume with mythos chat to continue.
+  Increase limits: mythos chat --max-tokens 1000000 --max-turns 50
+  Disable limits:  mythos chat --no-budget
+```
+
+Token counts, estimated cost, and budget status are displayed after every chat response.
 
 ---
 

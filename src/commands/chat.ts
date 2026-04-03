@@ -1,6 +1,7 @@
 // ─────────────────────────────────────────────────────────────
 //  mythos-router :: commands/chat.ts
 //  Interactive REPL with Capybara thinking protocol
+//  + Budget Limiter + Dry-Run + Verbose modes
 // ─────────────────────────────────────────────────────────────
 
 import * as readline from 'node:readline';
@@ -17,6 +18,8 @@ import {
   runSWD,
   printSWDResults,
   parseFileActions,
+  dryRunSWD,
+  printVerboseParse,
 } from '../swd.js';
 import {
   appendEntry,
@@ -25,23 +28,68 @@ import {
   getMemoryContext,
 } from '../memory.js';
 import { type EffortLevel, MAX_CORRECTION_RETRIES } from '../config.js';
-import { c, Spinner, BANNER, hr, heading } from '../utils.js';
+import { c, Spinner, BANNER, hr, heading, dryRunBadge, verboseBadge } from '../utils.js';
+import { SessionBudget } from '../budget.js';
+
+// ── Chat Command Options ─────────────────────────────────────
+interface ChatOptions {
+  effort?: string;
+  maxTokens?: string;
+  maxTurns?: string;
+  budget?: boolean;      // Commander uses --no-budget → budget=false
+  dryRun?: boolean;
+  verbose?: boolean;
+}
 
 // ── Chat Command ─────────────────────────────────────────────
-export async function chatCommand(options: {
-  effort?: string;
-}): Promise<void> {
+export async function chatCommand(options: ChatOptions): Promise<void> {
   const effort = (options.effort ?? 'high') as EffortLevel;
+  const dryRun = options.dryRun === true;
+  const verbose = options.verbose === true;
 
-  console.log(BANNER);
-  console.log(
-    `${c.dim}  effort: ${c.cyan}${effort}${c.dim} · model: ${c.cyan}claude-opus-4-6${c.dim} · swd: ${c.green}active${c.reset}`,
+  // ── Initialize Budget ────────────────────────────────────
+  const budgetEnabled = options.budget !== false;
+  const budget = new SessionBudget(
+    {
+      maxTokens: parseInt(options.maxTokens ?? '500000', 10) || 500_000,
+      maxTurns: parseInt(options.maxTurns ?? '25', 10) || 25,
+    },
+    budgetEnabled,
   );
+
+  // ── Banner ───────────────────────────────────────────────
+  console.log(BANNER);
+
+  // Mode badges
+  const modes: string[] = [];
+  modes.push(`${c.dim}effort: ${c.cyan}${effort}${c.reset}`);
+  modes.push(`${c.dim}model: ${c.cyan}claude-opus-4-6${c.reset}`);
+  modes.push(`${c.dim}swd: ${c.green}active${c.reset}`);
+  if (dryRun) modes.push(dryRunBadge());
+  if (verbose) modes.push(verboseBadge());
+  if (!budgetEnabled) modes.push(`${c.yellow}budget: disabled${c.reset}`);
+  console.log(`  ${modes.join(' · ')}`);
+
+  // Budget display
+  if (budgetEnabled) {
+    const snap = budget.status();
+    console.log(
+      `${c.dim}  budget: ${c.cyan}${snap.maxTokens.toLocaleString()}${c.dim} token limit · ` +
+      `${c.cyan}${snap.maxTurns}${c.dim} turn limit · ` +
+      `${c.green}${BUDGET_WARN_PERCENT}%${c.dim} warning threshold${c.reset}`,
+    );
+  }
+
   printMemoryStatus();
   console.log(hr());
-  console.log(
-    `${c.dim}  Type your message. Use ${c.cyan}/exit${c.dim} to quit, ${c.cyan}/dream${c.dim} to compress memory.${c.reset}\n`,
-  );
+
+  const helpItems = [
+    `${c.cyan}/exit${c.dim} quit`,
+    `${c.cyan}/dream${c.dim} compress memory`,
+    `${c.cyan}/budget${c.dim} show budget`,
+    `${c.cyan}/clear${c.dim} reset conversation`,
+  ];
+  console.log(`${c.dim}  Commands: ${helpItems.join(' · ')}${c.reset}\n`);
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -75,8 +123,12 @@ export async function chatCommand(options: {
       return;
     }
 
-    // Handle commands
+    // ── Handle slash commands ──────────────────────────────
     if (input === '/exit' || input === '/quit' || input === '/q') {
+      // Show final budget summary
+      if (budgetEnabled && budget.status().turns > 0) {
+        console.log(`\n${budget.formatBar()}`);
+      }
       console.log(`\n${c.dim}Capybara signing off. 🐾${c.reset}\n`);
       rl.close();
       process.exit(0);
@@ -94,11 +146,31 @@ export async function chatCommand(options: {
       return;
     }
 
+    if (input === '/budget') {
+      console.log(`\n${budget.formatBar()}`);
+      rl.prompt();
+      return;
+    }
+
     if (input === '/clear') {
       conversationHistory.length = 0;
       console.log(`${c.dim}Conversation cleared. Memory persists in MEMORY.md.${c.reset}`);
       rl.prompt();
       return;
+    }
+
+    // ── Budget Pre-Check ──────────────────────────────────
+    const budgetCheck = budget.check();
+    if (!budgetCheck.ok) {
+      // ── Graceful Save: persist progress before stopping ──
+      const summary = budget.formatSessionSummary();
+      appendEntry(summary, '⏸ Session paused — budget reached', dryRun);
+
+      const warning = budget.formatWarning();
+      if (warning) console.log(`\n${warning}`);
+      console.log(`\n${budget.formatBar()}`);
+      rl.close();
+      process.exit(0);
     }
 
     // ── Pre-SWD: Snapshot files in CWD ────────────────────
@@ -124,9 +196,14 @@ export async function chatCommand(options: {
             process.stdout.write(`\n${c.dim}${c.italic}💭 `);
             thinkingStarted = true;
           }
-          // Show a condensed version of thinking
-          const condensed = delta.replace(/\n/g, ' ').slice(0, 200);
-          process.stdout.write(`${c.dim}${condensed}`);
+          if (verbose) {
+            // Full thinking output in verbose mode
+            process.stdout.write(`${c.dim}${delta}`);
+          } else {
+            // Condensed thinking in normal mode
+            const condensed = delta.replace(/\n/g, ' ').slice(0, 200);
+            process.stdout.write(`${c.dim}${condensed}`);
+          }
         },
         // onTextDelta
         (delta) => {
@@ -152,30 +229,69 @@ export async function chatCommand(options: {
       // Add to history
       conversationHistory.push({ role: 'assistant', content: response.text });
 
-      // ── SWD Check ───────────────────────────────────────
-      const swdResult = runSWD(response.text, beforeSnapshots);
-      printSWDResults(swdResult);
+      // ── Record budget ──────────────────────────────────
+      budget.record(response.inputTokens, response.outputTokens);
 
-      // Correction loop
-      if (!swdResult.verified && swdResult.correctionPrompt) {
-        await correctionLoop(
-          conversationHistory,
-          swdResult.correctionPrompt,
-          beforeSnapshots,
-          effort,
-          spinner,
-        );
+      // ── Verbose: Show parse trace ──────────────────────
+      if (verbose) {
+        printVerboseParse(response.text);
       }
 
-      // ── Memory Write ────────────────────────────────────
-      const actionSummary = summarizeActions(response.text, input);
-      const verifyStatus = swdResult.verified
-        ? '✅ verified'
-        : `⚠️ ${swdResult.actions.filter((a) => a.status !== 'verified').length} issues`;
-      appendEntry(actionSummary, verifyStatus);
+      // ── SWD Check (Normal vs Dry-Run) ──────────────────
+      if (dryRun) {
+        // Dry-run: preview and ask for confirmation
+        const dryResult = await dryRunSWD(response.text);
+        if (dryResult.rejected.length > 0) {
+          appendEntry(
+            `dry-run: ${dryResult.rejected.length} action(s) rejected`,
+            '⚠️ User rejected file operations',
+            dryRun,
+          );
+        }
+        if (dryResult.accepted.length > 0) {
+          appendEntry(
+            `dry-run: ${dryResult.accepted.length} action(s) accepted`,
+            '✅ User would accept these operations',
+            dryRun,
+          );
+        }
+      } else {
+        // Normal mode: verify against filesystem
+        const swdResult = runSWD(response.text, beforeSnapshots);
+        printSWDResults(swdResult);
+
+        // Correction loop
+        if (!swdResult.verified && swdResult.correctionPrompt) {
+          await correctionLoop(
+            conversationHistory,
+            swdResult.correctionPrompt,
+            beforeSnapshots,
+            effort,
+            spinner,
+            budget,
+            dryRun,
+          );
+        }
+
+        // ── Memory Write ──────────────────────────────────
+        const actionSummary = summarizeActions(response.text, input);
+        const verifyStatus = swdResult.verified
+          ? '✅ verified'
+          : `⚠️ ${swdResult.actions.filter((a) => a.status !== 'verified').length} issues`;
+        appendEntry(actionSummary, verifyStatus, dryRun);
+      }
 
       // Token usage
       console.log(`\n${formatTokenUsage(response)}`);
+
+      // Budget bar
+      console.log(budget.formatBar());
+
+      // Budget warning
+      const budgetWarning = budget.formatWarning();
+      if (budgetWarning) {
+        console.log(`\n${budgetWarning}`);
+      }
 
       // Dream check
       if (needsDream()) {
@@ -206,8 +322,18 @@ async function correctionLoop(
   initialSnapshots: Map<string, any>,
   effort: EffortLevel,
   spinner: Spinner,
+  budget: SessionBudget,
+  dryRun: boolean,
 ): Promise<void> {
   for (let attempt = 1; attempt <= MAX_CORRECTION_RETRIES; attempt++) {
+    // Budget check before correction
+    const budgetCheck = budget.check();
+    if (!budgetCheck.ok) {
+      console.log(`\n${budget.formatWarning()}`);
+      console.log(`${c.dim}Correction aborted — budget exhausted.${c.reset}`);
+      return;
+    }
+
     console.log(
       `\n${c.yellow}⟲ SWD Correction Turn ${attempt}/${MAX_CORRECTION_RETRIES}${c.reset}`,
     );
@@ -233,6 +359,9 @@ async function correctionLoop(
         content: correctionResponse.text,
       });
 
+      // Record budget for correction turn
+      budget.record(correctionResponse.inputTokens, correctionResponse.outputTokens);
+
       const swdResult = runSWD(correctionResponse.text, initialSnapshots);
       printSWDResults(swdResult);
 
@@ -248,6 +377,7 @@ async function correctionLoop(
         appendEntry(
           'SWD: Max corrections reached',
           '❌ Yielded to human after ' + MAX_CORRECTION_RETRIES + ' attempts',
+          dryRun,
         );
         return;
       }
@@ -300,3 +430,6 @@ function summarizeActions(output: string, userInput: string): string {
   // Fallback: first 80 chars of user input
   return `chat: ${userInput.slice(0, 80)}`;
 }
+
+// Import constant for budget display
+import { BUDGET_WARN_PERCENT } from '../config.js';

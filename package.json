@@ -1,6 +1,6 @@
 {
   "name": "mythos-router",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Capybara-tier CLI router — Claude Opus 4.6 with Adaptive Thinking, Strict Write Discipline, and Self-Healing Memory",
   "type": "module",
   "bin": {
@@ -44,7 +44,7 @@
     "type": "git",
     "url": "git+https://github.com/thewaltero/mythos-router.git"
   },
-  "homepage": "https://github.com/thewaltero/mythos-router#readme",
+  "homepage": "https://x.com/thewaltero",
   "bugs": {
     "url": "https://github.com/thewaltero/mythos-router/issues"
   },

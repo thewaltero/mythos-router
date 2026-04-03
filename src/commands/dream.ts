@@ -12,13 +12,18 @@ import {
   type MemoryEntry,
 } from '../memory.js';
 import { sendMessage } from '../client.js';
-import { c, heading, hr, Spinner, success, info, warn } from '../utils.js';
+import { c, heading, hr, Spinner, success, info, warn, dryRunBadge } from '../utils.js';
 
 // ── Dream Command ────────────────────────────────────────────
 export async function dreamCommand(options: {
   force?: boolean;
+  dryRun?: boolean;
 }): Promise<void> {
+  const dryRun = options.dryRun === true;
   console.log(heading('💤 Summarization Dream'));
+  if (dryRun) {
+    console.log(`  ${dryRunBadge()} ${c.dim}Memory writes will be previewed, not executed.${c.reset}\n`);
+  }
 
   initMemory();
   const { entries, raw } = readMemory();
@@ -87,7 +92,7 @@ export async function dreamCommand(options: {
     const summary = response.text.trim();
 
     // Write compressed memory
-    writeCompressedMemory(summary, toKeep);
+    writeCompressedMemory(summary, toKeep, dryRun);
 
     // Stats
     const beforeSize = raw.length;
@@ -111,6 +116,7 @@ export async function dreamCommand(options: {
     appendEntry(
       `dream: compressed ${toCompress.length} entries`,
       `✅ ${ratio}% reduction`,
+      dryRun,
     );
   } catch (err: any) {
     spinner.stop();

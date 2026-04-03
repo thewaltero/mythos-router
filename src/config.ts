@@ -12,6 +12,18 @@ export const MEMORY_MAX_LINES = 100;
 
 export const MYTHOSIGNORE_FILE = '.mythosignore';
 
+// ── Budget Defaults (Financial Safety) ───────────────────────
+export const DEFAULT_MAX_TOKENS_PER_SESSION = 500_000;
+export const DEFAULT_MAX_TURNS = 25;
+export const BUDGET_WARN_PERCENT = 80;
+
+// ── Anthropic Pricing (USD per token) ────────────────────────
+// Claude Opus 4.6 pricing as of 2026-04.
+// Update these when Anthropic changes rates.
+// Source: https://docs.anthropic.com/en/docs/about-claude/pricing
+export const COST_PER_INPUT_TOKEN  = 15   / 1_000_000; // $15.00 / 1M input tokens
+export const COST_PER_OUTPUT_TOKEN = 75   / 1_000_000; // $75.00 / 1M output tokens
+
 export const DEFAULT_IGNORE_PATTERNS = [
   'node_modules',
   '.git',
