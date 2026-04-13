@@ -21,13 +21,17 @@ export function getMemoryPath(): string {
 }
 
 // ── Initialize MEMORY.md if it doesn't exist ─────────────────
-export function initMemory(): void {
+export function initMemory(dryRun = false): void {
   const path = getMemoryPath();
   if (!existsSync(path)) {
+    if (dryRun) {
+      console.log(`${dryRunBadge()} ${c.dim}Would create MEMORY.md (not yet initialized)${c.reset}`);
+      return;
+    }
     const header =
       `# 🧠 MEMORY.md — mythos-router Agentic Memory\n\n` +
       `> Auto-managed by the Capybara tier. Each model turn is logged.\n` +
-      `> When entries exceed ${MEMORY_MAX_LINES} lines, a "Dream" compresses older context.\n\n` +
+      `> When entries exceed ${MEMORY_MAX_LINES} entries, a "Dream" compresses older context.\n\n` +
       `---\n\n` +
       `| Timestamp | Action | Verified Result |\n` +
       `|-----------|--------|----------------|\n`;
@@ -37,7 +41,7 @@ export function initMemory(): void {
 
 // ── Append a single entry ────────────────────────────────────
 export function appendEntry(action: string, result: string, dryRun = false): void {
-  initMemory();
+  initMemory(dryRun);
   const path = getMemoryPath();
   const ts = timestamp();
   const line = `| ${ts} | ${sanitize(action)} | ${sanitize(result)} |`;
