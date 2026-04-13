@@ -6,7 +6,7 @@
 
 import * as readline from 'node:readline';
 import { resolve } from 'node:path';
-import { readdirSync, statSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import {
   streamMessage,
   formatTokenUsage,
@@ -27,7 +27,13 @@ import {
   printMemoryStatus,
   getMemoryContext,
 } from '../memory.js';
-import { type EffortLevel, MAX_CORRECTION_RETRIES } from '../config.js';
+import {
+  type EffortLevel,
+  MAX_CORRECTION_RETRIES,
+  BUDGET_WARN_PERCENT,
+  MODEL_ID,
+  DEFAULT_IGNORE_PATTERNS,
+} from '../config.js';
 import { c, Spinner, BANNER, hr, heading, dryRunBadge, verboseBadge } from '../utils.js';
 import { SessionBudget } from '../budget.js';
 
@@ -63,12 +69,15 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
   // Mode badges
   const modes: string[] = [];
   modes.push(`${c.dim}effort: ${c.cyan}${effort}${c.reset}`);
-  modes.push(`${c.dim}model: ${c.cyan}claude-opus-4-6${c.reset}`);
+  modes.push(`${c.dim}model: ${c.cyan}${MODEL_ID}${c.reset}`);
   modes.push(`${c.dim}swd: ${c.green}active${c.reset}`);
   if (dryRun) modes.push(dryRunBadge());
   if (verbose) modes.push(verboseBadge());
   if (!budgetEnabled) modes.push(`${c.yellow}budget: disabled${c.reset}`);
   console.log(`  ${modes.join(' · ')}`);
+  if (dryRun) {
+    console.log(`  ${dryRunBadge()} ${c.dim}Filesystem writes previewed. API calls execute normally.${c.reset}`);
+  }
 
   // Budget display
   if (budgetEnabled) {
@@ -174,7 +183,7 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
     }
 
     // ── Pre-SWD: Snapshot files in CWD ────────────────────
-    const cwdFiles = shallowScan(process.cwd());
+    const cwdFiles = scanProjectFiles(process.cwd());
     const beforeSnapshots = snapshotFiles(cwdFiles);
 
     // Add user message
@@ -399,26 +408,33 @@ async function correctionLoop(
 }
 
 // ── Helpers ──────────────────────────────────────────────────
-function shallowScan(dir: string): string[] {
+
+// Recursively scan all project files for SWD pre-snapshots.
+// Skips hidden paths and DEFAULT_IGNORE_PATTERNS (node_modules, dist, .git, MEMORY.md, etc.).
+function scanProjectFiles(dir: string): string[] {
   const results: string[] = [];
-  try {
-    const entries = readdirSync(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (
-        entry.name.startsWith('.') ||
-        entry.name === 'node_modules' ||
-        entry.name === 'dist'
-      ) {
-        continue;
+  const ignored = new Set(DEFAULT_IGNORE_PATTERNS);
+
+  function walk(current: string, depth: number): void {
+    if (depth > 8) return;
+    try {
+      const entries = readdirSync(current, { withFileTypes: true });
+      for (const entry of entries) {
+        const name = entry.name;
+        if (name.startsWith('.') || ignored.has(name)) continue;
+        const full = resolve(current, name);
+        if (entry.isDirectory()) {
+          walk(full, depth + 1);
+        } else if (entry.isFile()) {
+          results.push(full);
+        }
       }
-      const full = resolve(dir, entry.name);
-      if (entry.isFile()) {
-        results.push(full);
-      }
+    } catch {
+      // Permission denied, etc.
     }
-  } catch {
-    // ignore
   }
+
+  walk(dir, 0);
   return results;
 }
 
@@ -431,5 +447,3 @@ function summarizeActions(output: string, userInput: string): string {
   return `chat: ${userInput.slice(0, 80)}`;
 }
 
-// Import constant for budget display
-import { BUDGET_WARN_PERCENT } from '../config.js';
