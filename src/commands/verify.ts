@@ -5,7 +5,6 @@
 
 import { readdirSync, statSync, readFileSync, existsSync } from 'node:fs';
 import { resolve, relative, join } from 'node:path';
-import { createHash } from 'node:crypto';
 import { readMemory, initMemory, appendEntry, getMemoryPath } from '../memory.js';
 import { DEFAULT_IGNORE_PATTERNS, MYTHOSIGNORE_FILE } from '../config.js';
 import { c, heading, success, warn, error, info, hr, timestamp, dryRunBadge } from '../utils.js';
@@ -65,7 +64,6 @@ export async function verifyCommand(options: { dryRun?: boolean } = {}): Promise
 
       if (existsSync(absPath)) {
         const stat = statSync(absPath);
-        const hash = hashFile(absPath);
 
         // Check if the most recent memory entry for this file reflects current state
         const lastEntry = entries
@@ -208,15 +206,6 @@ function shouldIgnore(
 }
 
 // ── Utilities ────────────────────────────────────────────────
-function hashFile(path: string): string {
-  try {
-    const content = readFileSync(path);
-    return createHash('sha256').update(content).digest('hex').slice(0, 16);
-  } catch {
-    return 'error';
-  }
-}
-
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
   if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)}KB`;
