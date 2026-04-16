@@ -41,7 +41,7 @@ ${c.cyan}${c.bold}
     ██║ ╚═╝ ██║   ██║      ██║   ██║  ██║╚██████╔╝███████║
     ╚═╝     ╚═╝   ╚═╝      ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚══════╝
 ${c.reset}${c.dim}    ┌─────────────────────────────────────────────────────┐
-    │  ${c.yellow}Capybara Tier${c.reset}${c.dim} · Opus 4.6 · Strict Write Discipline  │
+    │  ${c.yellow}Capybara Tier${c.reset}${c.dim} · Opus 4.7 · Strict Write Discipline  │
     │  ${c.gray}Adaptive Thinking · Self-Healing Memory · Zero Slop${c.reset}${c.dim}  │
     └─────────────────────────────────────────────────────┘${c.reset}
 `;
