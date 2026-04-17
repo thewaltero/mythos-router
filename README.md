@@ -21,7 +21,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/thewaltero/mythos-router?style=social)](https://github.com/thewaltero/mythos-router)
 
 <p align="center">
-  <img src="assets/demo.pngg" alt="mythos-router terminal demo" width="700" />
+  <img src="assets/demo.png" alt="mythos-router terminal demo" width="700" />
 </p>
 
 ```bash
