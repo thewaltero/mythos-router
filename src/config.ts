@@ -1,9 +1,8 @@
-// ─────────────────────────────────────────────────────────────
-//  mythos-router :: config.ts
-//  Constants, system prompt, and validation
-// ─────────────────────────────────────────────────────────────
-
-export const MODEL_ID = 'claude-opus-4-7';
+export const MODELS: Record<string, string> = {
+  high: 'claude-opus-4-7',
+  medium: 'claude-sonnet-3-5',
+  low: 'claude-haiku-3',
+};
 
 export const MAX_CORRECTION_RETRIES = 2;
 
