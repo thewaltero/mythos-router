@@ -5,9 +5,21 @@
 
 import { readFileSync, statSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { resolve } from 'node:path';
+import { resolve, relative, isAbsolute } from 'node:path';
 import { MAX_CORRECTION_RETRIES } from './config.js';
 import { c, warn, error, success, dryRunBadge, verboseBadge, confirmPrompt } from './utils.js';
+
+// ── Path Sanitization ────────────────────────────────────────
+export function resolveSafePath(unsafePath: string): string {
+  const cwd = process.cwd();
+  const absPath = resolve(cwd, unsafePath);
+  const relPath = relative(cwd, absPath);
+
+  if (relPath.startsWith('..') || isAbsolute(relPath)) {
+    throw new Error(`SECURITY VIOLATION: Path traversal detected. Action on '${unsafePath}' blocked.`);
+  }
+  return absPath;
+}
 
 // ── Types ────────────────────────────────────────────────────
 export interface FileSnapshot {
@@ -216,14 +228,14 @@ export function runSWD(
   }
 
   // Take "after" snapshots for all referenced paths
-  const paths = actions.map((a) => resolve(a.path));
+  const paths = actions.map((a) => resolveSafePath(a.path));
   const afterSnapshots = snapshotFiles(paths);
 
   const verifications: FileActionVerification[] = [];
   let allVerified = true;
 
   for (const action of actions) {
-    const absPath = resolve(action.path);
+    const absPath = resolveSafePath(action.path);
     const before = beforeSnapshots.get(absPath) ?? snapshotFile(absPath);
     const after = afterSnapshots.get(absPath) ?? snapshotFile(absPath);
     const result = verifyAction(action, before, after);
@@ -251,7 +263,7 @@ export function runSWD(
       verifications
         .filter((v) => v.status !== 'verified')
         .map((v) => {
-          const after = afterSnapshots.get(resolve(v.action.path));
+          const after = afterSnapshots.get(resolveSafePath(v.action.path));
           return `- ${v.action.path}: exists=${after?.exists ?? false}, size=${after?.size ?? 0}, hash=${after?.hash?.slice(0, 16) ?? 'N/A'}`;
         })
         .join('\n') +
@@ -288,7 +300,7 @@ export function printSWDResults(result: SWDResult): void {
 // ── Pre-scan: snapshot files that might be affected ──────────
 export function prescanPaths(modelOutput: string): string[] {
   const actions = parseFileActions(modelOutput);
-  return actions.map((a) => resolve(a.path));
+  return actions.map((a) => resolveSafePath(a.path));
 }
 
 // ── Dry-Run SWD — Preview actions with interactive approval ──
@@ -308,7 +320,7 @@ export async function dryRunSWD(modelOutput: string): Promise<DryRunResult> {
 
   for (let i = 0; i < actions.length; i++) {
     const action = actions[i]!;
-    const absPath = resolve(action.path);
+    const absPath = resolveSafePath(action.path);
     const snap = snapshotFile(absPath);
 
     // Show action details
@@ -364,7 +376,7 @@ export function printVerboseAction(action: FileAction): void {
   if (action.contentHash) {
     console.log(`  ${c.dim}├─ Content Hash: ${action.contentHash}${c.reset}`);
   }
-  const snap = snapshotFile(resolve(action.path));
+  const snap = snapshotFile(resolveSafePath(action.path));
   if (snap.exists) {
     console.log(`  ${c.dim}└─ Current: ${snap.size} bytes, hash=${snap.hash.slice(0, 24)}…${c.reset}`);
   } else {
