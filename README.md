@@ -9,11 +9,10 @@
     ╚═╝     ╚═╝   ╚═╝      ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚══════╝
 </pre>
 
-### Capybara Tier · Claude Opus 4.7 · Strict Write Discipline
+### Claude Opus 4.7 · Strict Write Discipline · Zero Slop
 
 **Support the project. CA: 0xb942b75a602fa318ac091370d93d9143ba345ba3 ([$MYTHOS](https://app.uniswap.org/swap?outputCurrency=0xb942b75a602fa318ac091370d93d9143ba345ba3&chain=base) Base Token)**<br>
-**The leaked Anthropic reasoning protocol. Running locally.**
-
+**A local CLI power tool for verifiable AI-assisted coding.**
 
 [![npm](https://img.shields.io/npm/v/mythos-router?style=flat-square&color=cc785c)](https://www.npmjs.com/package/mythos-router)
 [![Node.js](https://img.shields.io/badge/Node.js-20+-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
@@ -37,9 +36,9 @@ npx mythos-router chat
 
 ## What is this?
 
-**mythos-router** is a local CLI power tool that implements the *leaked Anthropic "Capybara" reasoning protocol* — the specialized tier designed for PhD-level reasoning and cybersecurity analysis.
+**mythos-router** is a local CLI power tool that wraps Claude Opus 4.7 with a custom verification protocol called **Strict Write Discipline (SWD)**.
 
-Unlike standard Claude wrappers, mythos-router enforces **Strict Write Discipline (SWD)**: every file operation the AI claims to perform is *verified against the actual filesystem*. If the model hallucinates a write, it gets a Correction Turn. If it fails twice, it yields to the human.
+Unlike standard Claude wrappers, mythos-router enforces filesystem verification: every file operation the AI claims to perform is *checked against the actual filesystem using SHA-256 snapshots*. If the model's claim doesn't match reality, it gets a Correction Turn. If it fails twice, it yields to the human.
 
 Zero slop. Zero hallucinated state. Full adaptive thinking.
 
@@ -63,16 +62,21 @@ Zero slop. Zero hallucinated state. Full adaptive thinking.
 
 ## Core Architectural Pillars
 
-### 1. Multi-Model Orchestration
-Most AI tools slam one expensive model with every request, draining API budgets instantly. Mythos Router acts as a true orchestrator, dynamically routing sub-tasks to specialized models based on effort level:
--  **The Thinker (`Opus 4.7`)**: Handles high-effort architecture, reasoning, and system planning.
--  **The Writer (`Sonnet 3.5`)**: Receives localized plans to execute rapid, flawless code generation.
--  **The Validator (`Haiku 3`)**: Executes rapid background verify and drift detection tasks.
-*Result: PhD-level reasoning at 1/5th the API cost.*
+### 1. Configurable Model Selection
+Choose the right model for the job via the `--effort` flag:
 
-### 2. Automated "Dream" Summarization & The Original Sin
-Even with massive 200k+ context windows, models suffer from degradation ("lost in the middle") when packed with massive raw chat history. 
-The router tracks this using `MEMORY.md`. As memory approaches capacity, the router delegates a compression phase (the "Dream") to a low-cost model (`Haiku 3`). It condenses transaction logs into tight summaries while forever preserving the **"Original Sin"** of the project—the core architectural decisions and constraints. This prevents AI drift and saves massive API costs on every subsequent turn.
+| Effort | Model | Best For |
+|--------|-------|----------|
+|  `high` (default) | Claude Opus 4.7 | Architecture, deep reasoning, complex refactors |
+|  `medium` | Claude Sonnet 3.5 | Balanced code generation, everyday tasks |
+|  `low` | Claude Haiku 3 | Quick answers, memory compression, verification |
+
+The `dream` command automatically uses `low` effort (Haiku) for cost-efficient memory compression, and `verify` uses lightweight scanning — so you only burn Opus tokens when you need deep reasoning.
+
+### 2. Automated "Dream" Summarization
+Even with massive 200k+ context windows, models suffer from degradation ("lost in the middle") when packed with raw chat history.
+
+As memory approaches capacity, the `dream` command delegates a compression phase to a low-cost model (Haiku 3). It condenses transaction logs into tight summaries while preserving core architectural decisions and constraints. This prevents context drift and saves API costs on every subsequent turn.
 
 ---
 
@@ -111,12 +115,12 @@ npm run chat
 
 ## Usage
 
-### `mythos chat` — Interactive Capybara Session
+### `mythos chat` — Interactive Session
 
 ```bash
-mythos chat                  # Full power (high effort)
-mythos chat --effort low     # Budget mode
-mythos chat --effort medium  # Balanced
+mythos chat                  # Full power (high effort, Opus 4.7)
+mythos chat --effort low     # Budget mode (Haiku 3)
+mythos chat --effort medium  # Balanced (Sonnet 3.5)
 mythos chat --dry-run        # Preview all file changes before executing
 mythos chat --verbose        # See full SWD traces and thinking
 mythos chat --dry-run --verbose  # Maximum transparency
@@ -154,7 +158,7 @@ In dry-run mode, every file operation is previewed before execution:
 
   1/2 MODIFY src/index.ts
   Description: Change 'axios' to 'fetch'
-  Current state: 1,832 bytes, hash: 7a3f2c1e...
+  Current state: 1,832 bytes, hash: 7a3f2c1e..
    DRY-RUN  Accept MODIFY on src/index.ts? [Y/n] y
   ✔ Accepted: MODIFY src/index.ts
 
@@ -195,7 +199,7 @@ When `MEMORY.md` exceeds 100 entries, older logs are compressed into a summary b
 
 ### 🔌 SDK Usage (For Agentic Systems)
 
-`mythos-router` is not just a CLI—it is a programmable execution layer natively exposing its Strict Write Discipline and Multi-Model Router to other AI developers.
+`mythos-router` exposes its Strict Write Discipline engine for programmatic use:
 
 ```typescript
 import { runSWD, snapshotFiles } from 'mythos-router';
@@ -224,7 +228,7 @@ if (result.verified) {
 mythos-router/
 ├── src/
 │   ├── cli.ts           # Commander.js entry point
-│   ├── config.ts        # Capybara system prompt + constants + budget defaults
+│   ├── config.ts        # System prompt + constants + budget defaults
 │   ├── client.ts        # Anthropic SDK (adaptive thinking)
 │   ├── budget.ts        # Session budget limiter (token cap, turn cap)
 │   ├── swd.ts           # Strict Write Discipline + dry-run preview
@@ -234,6 +238,7 @@ mythos-router/
 │       ├── chat.ts      # Interactive REPL (budget + dry-run + verbose)
 │       ├── verify.ts    # Codebase ↔ Memory scanner (dry-run aware)
 │       └── dream.ts     # Memory compression (dry-run aware)
+├── test/                # Automated test suite (node:test)
 ├── .mythosignore        # SWD scan exclusions
 ├── MEMORY.md            # Auto-generated agentic memory
 └── AGENTS.md            # Project conventions
@@ -245,19 +250,16 @@ mythos-router/
 User Input
     │
     ▼
-[Pre-Snapshot] ── filesystem state captured
-    │
-    ▼
-[Claude Opus 4.7] ── adaptive thinking (high effort)
+[Claude Opus 4.7] ── adaptive thinking
     │
     ▼
 [Parse FILE_ACTION blocks] ── extract claimed operations
     │
     ▼
-[Post-Snapshot] ── filesystem state re-captured
+[Snapshot referenced files] ── targeted filesystem state capture
     │
     ▼
-[Verify] ── before vs. after vs. model claims
+[Verify] ── model claims vs. actual filesystem
     │
     ├── ✅ All verified → Log to MEMORY.md
     │
@@ -279,19 +281,6 @@ If you prefer to keep it private, add `MEMORY.md` to your `.gitignore`.
 
 ---
 
-## The Capybara System Prompt
-
-The system prompt implements the leaked Anthropic protocol:
-
-> **Tier: Capybara** (Specialized in Cybersecurity & PhD Reasoning)
->
-> Follow 'Strict Write Discipline' and never hallucinate filesystem state.
-> Every file operation must be wrapped in `[FILE_ACTION]` blocks for verification.
-
-The model is instructed to emit machine-readable delimiters around every file operation, making SWD verification 100% reliable.
-
----
-
 ## Configuration
 
 | Env Variable | Required | Description |
@@ -299,7 +288,7 @@ The model is instructed to emit machine-readable delimiters around every file op
 | `ANTHROPIC_API_KEY` | ✅ | Your Anthropic API key |
 
 | File | Purpose |
-|------|---------|
+|------|---------| 
 | `.mythosignore` | Patterns to exclude from SWD scanning |
 | `MEMORY.md` | Auto-generated agentic memory log |
 
@@ -333,7 +322,7 @@ The model is instructed to emit machine-readable delimiters around every file op
 | `dream` | Low effort summarization (~500 tokens) |
 
 | Budget Setting | Default |
-|---------------|--------|
+|---------------|---------|
 | `--max-tokens` | 500,000 per session |
 | `--max-turns` | 25 per session |
 | Warning threshold | 80% consumption |
@@ -355,35 +344,13 @@ Token counts, estimated cost, and budget status are displayed after every chat r
 
 ---
 
-## Execution Model
+## Testing
 
-1. User input is received in CLI
-2. LLM generates response with structured file operations
-3. File system snapshot is captured
-4. Proposed changes are validated against actual filesystem state
-5. Verified actions are applied and logged to `MEMORY.md`
-6. Drift or mismatches trigger correction handling
-
----
-
-## MEMORY.md
-
-`MEMORY.md` acts as a persistent execution log of the agent system.
-
-It records:
-- executed file operations
-- session summaries
-- verification results
-
-It can optionally be committed to version control for collaborative AI-assisted development.
-
----
-
-## Environment Variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `ANTHROPIC_API_KEY` | Yes | API key for Anthropic models |
+```bash
+npm test                 # Run full test suite
+npx tsc --noEmit         # Type check only
+npm run build            # Production build
+```
 
 ---
 
