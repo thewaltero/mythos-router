@@ -46,8 +46,8 @@ To maintain a sustainable ecosystem, `$MYTHOS` employs several utility-driven si
 ## 5. Contract Security
 
 *   **Network:** Base (Layer 2)
-*   **CA:** `0xb942...` *(Replace with your actual contract address)*
-*   **Liquidity:** Locked via [Uncx / Team.Finance]
+*   **CA:** `0xb942b75a602fa318ac091370d93d9143ba345ba3`
+*   **Liquidity:** Locked
 *   **Audit:** [Pending / Community Verified]
 
 > [!WARNING]
