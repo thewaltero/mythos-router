@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { beforeEach, afterEach } from 'node:test';
 import {
   c,
   timestamp,
@@ -9,6 +10,7 @@ import {
   dryRunBadge,
   verboseBadge,
   BANNER,
+  Spinner,
 } from '../src/utils.js';
 
 
@@ -133,5 +135,44 @@ describe('BANNER', () => {
   it('is a non-empty string', () => {
     assert.ok(typeof BANNER === 'string');
     assert.ok(BANNER.length > 100);
+  });
+});
+
+describe('Spinner', () => {
+  let originalStdoutWrite: typeof process.stdout.write;
+  let stdoutData: string[] = [];
+
+  beforeEach(() => {
+    stdoutData = [];
+    originalStdoutWrite = process.stdout.write;
+    process.stdout.write = (chunk: string | Uint8Array, encoding?: any, cb?: any) => {
+      stdoutData.push(chunk.toString());
+      if (typeof encoding === 'function') encoding();
+      else if (typeof cb === 'function') cb();
+      return true;
+    };
+  });
+
+  afterEach(() => {
+    process.stdout.write = originalStdoutWrite;
+  });
+
+  it('starts and stops correctly', () => {
+    const spinner = new Spinner();
+    spinner.start('Test msg');
+    assert.ok(stdoutData.some(d => d.includes('Test msg')));
+    
+    spinner.stop('Done');
+    assert.ok(stdoutData.some(d => d.includes('Done')));
+  });
+
+  it('updates the message keeping the spinner active', () => {
+    const spinner = new Spinner();
+    spinner.start('Start msg');
+    spinner.update('Updated msg');
+    
+    // update should force a render immediately
+    assert.ok(stdoutData.some(d => d.includes('Updated msg')));
+    spinner.stop();
   });
 });
