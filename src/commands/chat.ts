@@ -1,6 +1,10 @@
+// ─────────────────────────────────────────────────────────────
+//  mythos-router :: commands/chat.ts
+//  Interactive REPL with Capybara thinking protocol
+//  + Budget Limiter + Dry-Run + Verbose modes
+// ─────────────────────────────────────────────────────────────
+
 import * as readline from 'node:readline';
-import { resolve } from 'node:path';
-import { readdirSync } from 'node:fs';
 import {
   streamMessage,
   formatTokenUsage,
@@ -14,6 +18,7 @@ import {
   parseFileActions,
   dryRunSWD,
   printVerboseParse,
+  resolveSafePath,
 } from '../swd.js';
 import {
   appendEntry,
@@ -26,7 +31,6 @@ import {
   MAX_CORRECTION_RETRIES,
   BUDGET_WARN_PERCENT,
   MODELS,
-  DEFAULT_IGNORE_PATTERNS,
 } from '../config.js';
 import { c, Spinner, BANNER, hr, heading, dryRunBadge, verboseBadge } from '../utils.js';
 import { SessionBudget } from '../budget.js';
@@ -176,10 +180,6 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
       process.exit(0);
     }
 
-    // ── Pre-SWD: Snapshot files in CWD ────────────────────
-    const cwdFiles = scanProjectFiles(process.cwd());
-    const beforeSnapshots = snapshotFiles(cwdFiles);
-
     // Add user message
     conversationHistory.push({ role: 'user', content: input });
 
@@ -259,6 +259,10 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
           );
         }
       } else {
+        // Lazy snapshot: only snapshot files referenced in FILE_ACTION blocks
+        const referencedPaths = extractReferencedPaths(response.text);
+        const beforeSnapshots = snapshotFiles(referencedPaths);
+
         // Normal mode: verify against filesystem
         const swdResult = runSWD(response.text, beforeSnapshots);
         printSWDResults(swdResult);
@@ -403,33 +407,19 @@ async function correctionLoop(
 
 // ── Helpers ──────────────────────────────────────────────────
 
-// Recursively scan all project files for SWD pre-snapshots.
-// Skips hidden paths and DEFAULT_IGNORE_PATTERNS (node_modules, dist, .git, MEMORY.md, etc.).
-function scanProjectFiles(dir: string): string[] {
-  const results: string[] = [];
-  const ignored = new Set(DEFAULT_IGNORE_PATTERNS);
-
-  function walk(current: string, depth: number): void {
-    if (depth > 8) return;
+// Extract file paths referenced in FILE_ACTION blocks and resolve them safely.
+// Only these files are snapshotted — avoids hashing the entire project tree.
+function extractReferencedPaths(modelOutput: string): string[] {
+  const actions = parseFileActions(modelOutput);
+  const paths: string[] = [];
+  for (const action of actions) {
     try {
-      const entries = readdirSync(current, { withFileTypes: true });
-      for (const entry of entries) {
-        const name = entry.name;
-        if (name.startsWith('.') || ignored.has(name)) continue;
-        const full = resolve(current, name);
-        if (entry.isDirectory()) {
-          walk(full, depth + 1);
-        } else if (entry.isFile()) {
-          results.push(full);
-        }
-      }
+      paths.push(resolveSafePath(action.path));
     } catch {
-      // Permission denied, etc.
+      // Path traversal blocked — skip silently
     }
   }
-
-  walk(dir, 0);
-  return results;
+  return paths;
 }
 
 function summarizeActions(output: string, userInput: string): string {
