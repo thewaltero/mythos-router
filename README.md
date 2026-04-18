@@ -11,7 +11,9 @@
 
 ### Capybara Tier · Claude Opus 4.7 · Strict Write Discipline
 
+**Support the project. CA: 0xb942b75a602fa318ac091370d93d9143ba345ba3 ([$MYTHOS](https://app.uniswap.org/swap?outputCurrency=0xb942b75a602fa318ac091370d93d9143ba345ba3&chain=base) Base Token)**<br>
 **The leaked Anthropic reasoning protocol. Running locally.**
+
 
 [![npm](https://img.shields.io/npm/v/mythos-router?style=flat-square&color=cc785c)](https://www.npmjs.com/package/mythos-router)
 [![Node.js](https://img.shields.io/badge/Node.js-20+-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
