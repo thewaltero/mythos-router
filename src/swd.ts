@@ -3,7 +3,7 @@
 //  Strict Write Discipline — Filesystem verification engine
 // ─────────────────────────────────────────────────────────────
 
-import { readFileSync, statSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, statSync, existsSync, unlinkSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve, relative, isAbsolute } from 'node:path';
 import { MAX_CORRECTION_RETRIES } from './config.js';
@@ -28,6 +28,7 @@ export interface FileSnapshot {
   size: number;
   mtime: number;
   hash: string;
+  content: Buffer | null;
 }
 
 export interface FileAction {
@@ -41,6 +42,7 @@ export interface SWDResult {
   verified: boolean;
   actions: FileActionVerification[];
   correctionPrompt?: string;
+  rollbacks?: string[];
 }
 
 export interface FileActionVerification {
@@ -60,7 +62,7 @@ export function snapshotFile(filePath: string): FileSnapshot {
   const absPath = resolve(filePath);
   try {
     if (!existsSync(absPath)) {
-      return { path: absPath, exists: false, size: 0, mtime: 0, hash: '' };
+      return { path: absPath, exists: false, size: 0, mtime: 0, hash: '', content: null };
     }
     const stat = statSync(absPath);
     const content = readFileSync(absPath);
@@ -71,9 +73,10 @@ export function snapshotFile(filePath: string): FileSnapshot {
       size: stat.size,
       mtime: stat.mtimeMs,
       hash,
+      content,
     };
   } catch {
-    return { path: absPath, exists: false, size: 0, mtime: 0, hash: '' };
+    return { path: absPath, exists: false, size: 0, mtime: 0, hash: '', content: null };
   }
 }
 
@@ -245,9 +248,32 @@ export function runSWD(
     }
   }
 
-  // Generate correction prompt if needed
   let correctionPrompt: string | undefined;
+  const rollbacks: string[] = [];
+
   if (!allVerified) {
+    // Transactional Rollback
+    for (const action of actions) {
+      const absPath = resolveSafePath(action.path);
+      const before = beforeSnapshots.get(absPath);
+      const after = afterSnapshots.get(absPath);
+      
+      if (!before || !after) continue;
+
+      if (before.hash !== after.hash || before.exists !== after.exists) {
+        try {
+          if (before.exists && before.content !== null) {
+            writeFileSync(absPath, before.content);
+          } else if (existsSync(absPath)) {
+            unlinkSync(absPath);
+          }
+          rollbacks.push(action.path);
+        } catch (e) {
+          // Silent catch for rollback errors
+        }
+      }
+    }
+
     const failures = verifications
       .filter((v) => v.status !== 'verified')
       .map(
@@ -274,6 +300,7 @@ export function runSWD(
     verified: allVerified,
     actions: verifications,
     correctionPrompt,
+    rollbacks,
   };
 }
 
@@ -293,6 +320,13 @@ export function printSWDResults(result: SWDResult): void {
       case 'failed':
         error(v.detail);
         break;
+    }
+  }
+
+  if (result.rollbacks && result.rollbacks.length > 0) {
+    console.log(`\n${c.bgYellow}${c.black}${c.bold} TRANSACTION ROLLBACK ${c.reset}`);
+    for (const rb of result.rollbacks) {
+      console.log(`  ${c.yellow}⟲${c.reset} Restored pristine state: ${c.cyan}${rb}${c.reset}`);
     }
   }
 }
