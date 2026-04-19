@@ -102,6 +102,24 @@ DESCRIPTION: Test case insensitivity
     assert.equal(actions.length, 1);
     assert.equal(actions[0]!.operation, 'CREATE');
   });
+
+  it('parses CONTENT field correctly including multi-line text', () => {
+    const output = `
+[FILE_ACTION: src/app.ts]
+OPERATION: CREATE
+DESCRIPTION: New app entry
+CONTENT:
+import { Server } from 'node:http';
+const s = new Server();
+s.listen(8080);
+[/FILE_ACTION]
+`;
+    const actions = parseFileActions(output);
+    assert.equal(actions.length, 1);
+    assert.equal(actions[0]!.path, 'src/app.ts');
+    assert.ok(actions[0]!.content?.includes('import { Server }'));
+    assert.ok(actions[0]!.content?.includes('s.listen(8080)'));
+  });
 });
 
 
