@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.7] — 2026-04-19
+
+### Added
+- **Interactive Inline Diffs** — High-fidelity terminal previews for dry-run mode. Review exact line changes with ANSI coloring and line numbering before applying.
+- **Myers Diff Engine** — Implemented a zero-dependency, line-based shortest-edit-script algorithm in `src/diff.ts`.
+
+### Changed
+- **SWD Protocol Upgrade** — Updated the "Capybara" system prompt to include the `CONTENT` field for 100% verifiability of file operations.
+- **Enhanced Regex Parsing** — Robust multi-line block extraction for complex code transfers.
+
+---
+
 ## [1.1.6] — 2026-04-19
 
 ### Added
@@ -78,9 +90,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Correction Turns** — max 2 retries before yielding to human.
 - **Dream/Verify Commands** — memory compression and drift detection.
 
-[1.1.6]: https://github.com/thewaltero/mythos-router/compare/v1.1.3...v1.1.6
-[1.1.3]: https://github.com/thewaltero/mythos-router/compare/v1.1.2...v1.1.3
-[1.1.2]: https://github.com/thewaltero/mythos-router/compare/v1.1.1...v1.1.2
-[1.1.1]: https://github.com/thewaltero/mythos-router/compare/v1.1.0...v1.1.1
-[1.1.0]: https://github.com/thewaltero/mythos-router/compare/v1.0.0...v1.1.0
+[1.1.7]: https://github.com/thewaltero/mythos-router/releases/tag/v1.1.7
+[1.1.6]: https://github.com/thewaltero/mythos-router/releases/tag/v1.1.6
+[1.1.3]: https://github.com/thewaltero/mythos-router/releases/tag/v1.1.3
+[1.1.2]: https://github.com/thewaltero/mythos-router/releases/tag/v1.1.2
+[1.1.1]: https://github.com/thewaltero/mythos-router/releases/tag/v1.1.1
+[1.1.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.1.0
 [1.0.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.0.0
