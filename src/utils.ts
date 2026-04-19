@@ -58,6 +58,13 @@ export class Spinner {
     this.currentMessage = message;
     this.frameIdx = 0;
     process.stdout.write('\x1b[?25l'); // hide cursor
+    
+    // Render first frame immediately
+    const frame = SPINNER_FRAMES[0]!;
+    process.stdout.write(
+      `\r\x1b[K${c.cyan}${frame}${c.reset} ${c.dim}${this.currentMessage}${c.reset}`
+    );
+
     this.interval = setInterval(() => {
       const frame = SPINNER_FRAMES[this.frameIdx % SPINNER_FRAMES.length]!;
       process.stdout.write(
