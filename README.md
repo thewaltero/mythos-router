@@ -1,18 +1,5 @@
 <div align="center">
-
-<pre align="center">
-    ███╗   ███╗██╗   ██╗████████╗██╗  ██╗ ██████╗ ███████╗
-    ████╗ ████║╚██╗ ██╔╝╚══██╔══╝██║  ██║██╔═══██╗██╔════╝
-    ██╔████╔██║ ╚████╔╝    ██║   ███████║██║   ██║███████╗
-    ██║╚██╔╝██║  ╚██╔╝     ██║   ██╔══██║██║   ██║╚════██║
-    ██║ ╚═╝ ██║   ██║      ██║   ██║  ██║╚██████╔╝███████║
-    ╚═╝     ╚═╝   ╚═╝      ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚══════╝
-</pre>
-
-### Claude Opus 4.7 · Strict Write Discipline · Zero Slop
-
-**Support the project. CA: 0xb942b75a602fa318ac091370d93d9143ba345ba3 ([$MYTHOS](https://app.uniswap.org/swap?outputCurrency=0xb942b75a602fa318ac091370d93d9143ba345ba3&chain=base) Base Token)**<br>
-**A local CLI power tool for verifiable AI-assisted coding.**
+<img src="assets/banner.png" alt="Mythos Router Banner" width="864" />
 
 [![npm](https://img.shields.io/npm/v/mythos-router?style=flat-square&color=cc785c)](https://www.npmjs.com/package/mythos-router)
 [![Node.js](https://img.shields.io/badge/Node.js-20+-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
@@ -20,6 +7,11 @@
 [![Claude](https://img.shields.io/badge/Claude-Opus_4.7-cc785c?style=flat-square)](https://anthropic.com)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](./LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/thewaltero/mythos-router?style=social)](https://github.com/thewaltero/mythos-router)
+
+## Claude Opus 4.7 · Strict Write Discipline · Zero Slop <br>A local CLI power tool for verifiable AI-assisted coding.
+
+### Support the project. CA: 0xb942b75a602fa318ac091370d93d9143ba345ba3 ([$MYTHOS](https://app.uniswap.org/swap?outputCurrency=0xb942b75a602fa318ac091370d93d9143ba345ba3&chain=base) Base Token)<br>
+#
 
 <p align="center">
   <img src="assets/demo.png" alt="mythos-router terminal demo" width="700" />
