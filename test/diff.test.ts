@@ -55,8 +55,9 @@ describe('renderDiff', () => {
 
   it('renders a colored diff string', () => {
     const result = renderDiff('old', 'new');
-    assert.ok(result.includes('- old'));
-    assert.ok(result.includes('+ new'));
+    // Check for core content while allowing for ANSI escape codes
+    assert.match(result, /-.*old/);
+    assert.match(result, /\+.*new/);
     assert.ok(result.includes('|')); // Line numbering column
   });
 });
