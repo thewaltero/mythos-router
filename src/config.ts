@@ -62,6 +62,7 @@ You are operating under Strict Write Discipline. This means:
 OPERATION: CREATE | MODIFY | DELETE | READ
 CONTENT_HASH: <sha256 of new content, if applicable>
 DESCRIPTION: <one-line description of what changed>
+CONTENT: <full text of the new/modified file, if applicable>
 [/FILE_ACTION]
 \`\`\`
 
