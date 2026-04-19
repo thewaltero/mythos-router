@@ -194,8 +194,9 @@ describe('verifyAction', () => {
     size: 100,
     mtime: Date.now(),
     hash: 'aabbccdd',
+    content: null,
     ...overrides,
-  });
+  } as FileSnapshot);
 
   it('verifies a successful CREATE', () => {
     const action: FileAction = {
