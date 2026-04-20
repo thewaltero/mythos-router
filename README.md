@@ -49,9 +49,9 @@ Zero slop. Zero hallucinated state. Full adaptive thinking.
 |---------|-------------|
 |  **Adaptive Thinking** | Opus 4.7 with configurable effort levels (high/medium/low) |
 |  **Strict Write Discipline** | Pre/post filesystem snapshots verify every model claim |
-|  **Self-Healing Memory** | `MEMORY.md` logs every action; auto-compresses via "Dream" |
+|  **Self-Healing Memory** | Authority-based logging with a rebuildable SQLite FTS5 search index |
 |  **Correction Turns** | Model gets 2 retries to match filesystem reality, then yields |
-|  **Drift Detection** | `verify` command syncs codebase state with memory |
+|  **Integrity Gate** | `verify` command and startup hashing ensure zero drift |
 |  **Token Limiter** | Budget cap with graceful save — progress saved to MEMORY.md, never lose work |
 |  **Dry-Run Mode** | Preview every file operation before it executes — full transparency |
 |  **Verbose Tracing** | See exactly what the AI is parsing, thinking, and verifying |
@@ -72,10 +72,12 @@ Choose the right model for the job via the `--effort` flag:
 
 The `dream` command automatically uses `low` effort (Haiku) for cost-efficient memory compression, and `verify` uses lightweight scanning — so you only burn Opus tokens when you need deep reasoning.
 
-### 2. Automated "Dream" Summarization
-Even with massive 200k+ context windows, models suffer from degradation ("lost in the middle") when packed with raw chat history.
+### 2. Authority-Based "Self-Healing" Memory
+Most agentic systems stored state in opaque databases or messy JSON files. Mythos Router treats `MEMORY.md` as the **Sole Authority**. 
 
-As memory approaches capacity, the `dream` command delegates a compression phase to a low-cost model (Haiku 3). It condenses transaction logs into tight summaries while preserving core architectural decisions and constraints. This prevents context drift and saves API costs on every subsequent turn.
+Every action is logged in Markdown first. On startup, the system verifies the integrity of the log via SHA-256 manifest hashing and reconstructs a high-performance **Derivative SQLite Index** (FTS5). If the index drifts or the database is deleted, the system self-heals by rebuilding from the authoritative Markdown source.
+
+As memory approaches capacity, the `dream` command delegates a compression phase to a low-cost model (Haiku 3), ensuring your "Sacred Log" is always lean and relevant.
 
 ---
 
