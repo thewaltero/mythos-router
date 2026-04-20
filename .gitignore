@@ -4,3 +4,9 @@ dist
 .env
 .env.*
 .DS_Store
+
+# Derivative SQLite Index (Non-authoritative)
+memory.db
+memory.db-journal
+memory.db-wal
+memory.db-shm
