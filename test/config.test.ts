@@ -12,6 +12,7 @@ import {
   COST_PER_OUTPUT_TOKEN,
   DEFAULT_IGNORE_PATTERNS,
   MEMORY_FILE,
+  MEMORY_DB_FILE,
   MEMORY_MAX_LINES,
 } from '../src/config.js';
 
@@ -87,6 +88,7 @@ describe('Config Constants', () => {
 
   it('memory config is set', () => {
     assert.equal(MEMORY_FILE, 'MEMORY.md');
+    assert.equal(MEMORY_DB_FILE, 'memory.db');
     assert.ok(MEMORY_MAX_LINES > 0);
   });
 });
