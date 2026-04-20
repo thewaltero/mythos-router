@@ -12,35 +12,49 @@ import {
   writeCompressedMemory,
   getMemoryContext,
   getMemoryPath,
+  getDbPath,
+  searchMemory,
 } from '../src/memory.js';
 
 
 const memoryPath = getMemoryPath();
+const dbPath = getDbPath();
 let backup: string | null = null;
 
 describe('Memory System', () => {
   beforeEach(() => {
+    // Authority Setup
     if (existsSync(memoryPath)) {
       backup = readFileSync(memoryPath, 'utf-8');
-    }
-    if (existsSync(memoryPath)) {
       unlinkSync(memoryPath);
+    }
+    // Derivative Setup (Fresh start)
+    if (existsSync(dbPath)) {
+      // Small delay or retry might be needed if node:sqlite keeps it open
+      try { unlinkSync(dbPath); } catch {}
     }
   });
 
   afterEach(() => {
+    // Authority Restore
     if (backup !== null) {
       writeFileSync(memoryPath, backup, 'utf-8');
     } else if (existsSync(memoryPath)) {
       unlinkSync(memoryPath);
     }
+    // Derivative cleanup
+    if (existsSync(dbPath)) {
+      try { unlinkSync(dbPath); } catch {}
+    }
   });
 
 
-  it('creates MEMORY.md if it does not exist', () => {
+  it('creates MEMORY.md and memory.db if they do not exist', () => {
     assert.equal(existsSync(memoryPath), false);
+    assert.equal(existsSync(dbPath), false);
     initMemory();
     assert.equal(existsSync(memoryPath), true);
+    assert.equal(existsSync(dbPath), true);
   });
 
   it('does not overwrite existing MEMORY.md', () => {
@@ -126,20 +140,47 @@ describe('Memory System', () => {
     assert.ok(ctx.length <= 220);
   });
 
-
-  it('writes compressed memory with summary and recent entries', () => {
+  it('provides surgical search via FTS5 SQLite index', () => {
     initMemory();
-    const recentEntries = [
-      { timestamp: '2026-01-01 00:00:00', action: 'recent1', result: '✅' },
-      { timestamp: '2026-01-01 00:01:00', action: 'recent2', result: '✅' },
-    ];
-    writeCompressedMemory('This is a dream summary.', recentEntries);
+    appendEntry('scaffold auth module', '✅ success');
+    appendEntry('fix budget overflow', '✅ success');
+    appendEntry('update system prompt', '✅ success');
 
+    // Query 1: exact match
+    const res1 = searchMemory('auth');
+    assert.equal(res1.length, 1);
+    assert.equal(res1[0]!.action, 'scaffold auth module');
+
+    // Query 2: broader match
+    const res2 = searchMemory('success');
+    assert.equal(res2.length, 3);
+  });
+
+  it('writes compressed memory and triggers index rebuild', () => {
+    initMemory();
+    appendEntry('entry before dream', '✅');
+    
+    const recentEntries = [
+      { timestamp: '2026-01-01 00:00:00', action: 'dreamaction', result: '✅' },
+    ];
+    writeCompressedMemory('dream summary here', recentEntries);
+
+    // Verify Authority (MD)
     const content = readFileSync(memoryPath, 'utf-8');
-    assert.ok(content.includes('Dream Summary'));
-    assert.ok(content.includes('This is a dream summary.'));
-    assert.ok(content.includes('recent1'));
-    assert.ok(content.includes('recent2'));
+    assert.ok(content.includes('dream summary here'));
+    assert.ok(content.includes('dreamaction'));
+
+    // Verify Entry Count (Authority check)
+    assert.equal(getEntryCount(), 1);
+
+    // Verify Derivative (DB) - Should have rebuilt to match the new reality
+    const res = searchMemory('dreamaction');
+    assert.equal(res.length, 1);
+    assert.equal(res[0]!.action, 'dreamaction');
+    
+    // The old entry should be gone from the index
+    const resOld = searchMemory('before');
+    assert.equal(resOld.length, 0);
   });
 
   it('skips write in dry-run mode', () => {
