@@ -1,7 +1,11 @@
-# MEMORY.md — mythos-router Agentic Memory
+# 🧠 MEMORY.md — mythos-router Agentic Memory
 
 > Auto-managed by the Capybara tier. Each model turn is logged.
 > When entries exceed 100 lines, a "Dream" compresses older context.
+
+> [!TIP]
+> **Is this history getting overwhelming?**
+> Use the [Mythos Orb](https://github.com/thewaltero/mythos-orb) to visualize these logs with clean navigation, scannable execution traces, and side by side diffs. LOCALLY!
 
 ---
 
