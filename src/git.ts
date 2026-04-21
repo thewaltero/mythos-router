@@ -55,3 +55,27 @@ export function createAndCheckoutBranch(name: string): void {
     throw new Error(`Git checkout failed: ${err.message}`);
   }
 }
+
+/**
+ * Commits all changes in the working tree.
+ * Runs 'git add -A' and 'git commit -m <message>'.
+ */
+export function commitChanges(message: string): void {
+  try {
+    execSync('git add -A', { stdio: 'ignore' });
+    execSync(`git commit -m "${message}"`, { stdio: 'ignore' });
+  } catch (err: any) {
+    throw new Error(`Git commit failed: ${err.message}`);
+  }
+}
+
+/**
+ * Returns the current HEAD commit hash.
+ */
+export function getLatestHash(): string {
+  try {
+    return execSync('git rev-parse HEAD', { encoding: 'utf-8' }).trim();
+  } catch {
+    return 'unknown';
+  }
+}
