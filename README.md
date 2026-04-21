@@ -55,6 +55,7 @@ Zero slop. Zero hallucinated state. Full adaptive thinking.
 |  **Token Limiter** | Budget cap with graceful save — progress saved to MEMORY.md, never lose work |
 |  **Dry-Run Mode** | Preview every file operation before it executes — full transparency |
 |  **Verbose Tracing** | See exactly what the AI is parsing, thinking, and verifying |
+|  **Session Branching** | Isolate AI actions in a namespaced git branch (`mythos/`) |
 |  **Zero Build** | Runs directly via `tsx` — no compile step in dev |
 
 ---
@@ -124,6 +125,7 @@ mythos chat --effort low     # Budget mode (Haiku 3)
 mythos chat --effort medium  # Balanced (Sonnet 3.5)
 mythos chat --dry-run        # Preview all file changes before executing
 mythos chat --verbose        # See full SWD traces and thinking
+mythos chat --branch refactor # Isolate session in a fresh git branch
 mythos chat --dry-run --verbose  # Maximum transparency
 ```
 
