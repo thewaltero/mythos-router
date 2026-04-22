@@ -22,3 +22,8 @@ node_modules/
 *.log
 .env
 .env.*
+
+# Database (local index)
+memory.db
+memory.db-shm
+memory.db-wal
