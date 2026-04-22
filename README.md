@@ -55,6 +55,7 @@ Zero slop. Zero hallucinated state. Full adaptive thinking.
 |  **Token Limiter** | Budget cap with graceful save — progress saved to MEMORY.md, never lose work |
 |  **Dry-Run Mode** | Preview every file operation before it executes — full transparency |
 |  **Verbose Tracing** | See exactly what the AI is parsing, thinking, and verifying |
+|  **Budget Analytics** | Persistent tracking of cost across sessions and projects via `stats` |
 |  **Session Branching** | Isolate AI actions in a namespaced git branch (`mythos/`) |
 |  **Zero Build** | Runs directly via `tsx` — no compile step in dev |
 
@@ -200,6 +201,20 @@ mythos dream --dry-run    # Preview without writing
 
 When `MEMORY.md` exceeds 100 entries, older logs are compressed into a summary block using Claude (low effort, minimal token burn). Recent entries are preserved intact.
 
+### `mythos stats` — Budget Analytics & Cost Profiling
+
+```bash
+mythos stats              # Show all-time token usage and costs
+mythos stats --days 7      # Filter for the last week
+```
+
+Tracks every penny spent across all your projects. Costs are aggregated by:
+- **Command** (e.g., `chat` vs `dream`)
+- **Project** (directory name)
+- **Time Period**
+
+Data is stored locally in `~/.mythos-router/metrics.json`.
+
 ### 🔌 SDK Usage (For Agentic Systems)
 
 `mythos-router` exposes its Strict Write Discipline engine for programmatic use:
@@ -236,11 +251,13 @@ mythos-router/
 │   ├── budget.ts        # Session budget limiter (token cap, turn cap)
 │   ├── swd.ts           # Strict Write Discipline + dry-run preview
 │   ├── memory.ts        # MEMORY.md self-healing manager (dry-run aware)
+│   ├── metrics.ts       # Global metrics store (persistent budget tracking)
 │   ├── utils.ts         # Terminal formatting, badges, prompts (zero-dep)
 │   └── commands/
 │       ├── chat.ts      # Interactive REPL (budget + dry-run + verbose)
 │       ├── verify.ts    # Codebase ↔ Memory scanner (dry-run aware)
-│       └── dream.ts     # Memory compression (dry-run aware)
+│       ├── dream.ts     # Memory compression (dry-run aware)
+│       └── stats.ts     # Budget analytics reporter
 ├── test/                # Automated test suite (node:test)
 ├── .mythosignore        # SWD scan exclusions
 ├── MEMORY.md            # Auto-generated agentic memory
