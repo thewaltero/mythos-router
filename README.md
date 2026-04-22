@@ -220,23 +220,31 @@ Data is stored locally in `~/.mythos-router/metrics.json`.
 `mythos-router` exposes its Strict Write Discipline engine for programmatic use:
 
 ```typescript
-import { runSWD, snapshotFiles } from 'mythos-router';
+import { SWDEngine, parseActions } from 'mythos-router';
 
-// 1. Snapshot the target directory before your agent executes
-const beforeState = snapshotFiles(['./src/components']);
+// 1. Create an engine instance with your preferred options
+const engine = new SWDEngine({
+  strict: true,
+  enableRollback: true,
+  onAction: (action) => console.log(`Executing: ${action.operation} ${action.path}`),
+  onVerify: (result) => console.log(`${result.status}: ${result.detail}`),
+});
 
 // 2. Let your agent generate code (must output [FILE_ACTION] blocks)
-const agentOutput = await myAgent.generateCode(); 
+const agentOutput = await myAgent.generateCode();
 
-// 3. Route through the Strict Write Discipline engine
-const result = runSWD(agentOutput, beforeState);
+// 3. Parse the agent's output and route through the SWD engine
+const actions = parseActions(agentOutput);
+const result = await engine.run(actions);
 
-if (result.verified) {
+if (result.success) {
   console.log('✅ Agent execution verified securely');
 } else {
-  console.log('❌ Agent hallucinated a write. Stopping execution.');
+  console.log('❌ Agent hallucinated a write. Rolled back:', result.rolledBack);
+  console.log('Errors:', result.errors);
 }
 ```
+
 
 ---
 
@@ -246,15 +254,19 @@ if (result.verified) {
 mythos-router/
 ├── src/
 │   ├── cli.ts           # Commander.js entry point
-│   ├── config.ts        # System prompt + constants + budget defaults
-│   ├── client.ts        # Anthropic SDK (adaptive thinking)
-│   ├── budget.ts        # Session budget limiter (token cap, turn cap)
-│   ├── swd.ts           # Strict Write Discipline + dry-run preview
-│   ├── memory.ts        # MEMORY.md self-healing manager (dry-run aware)
+│   ├── config.ts        # System prompt + constants + budget defaults + validation
+│   ├── client.ts        # Anthropic SDK (adaptive thinking, streaming)
+│   ├── budget.ts        # Session budget limiter (token cap, turn cap, progress bar)
+│   ├── swd.ts           # SWD execution kernel (engine, types, parsing, snapshots)
+│   ├── swd-cli.ts       # SWD terminal presentation (verification output, dry-run)
+│   ├── memory.ts        # MEMORY.md self-healing manager (SQLite FTS5 index)
 │   ├── metrics.ts       # Global metrics store (persistent budget tracking)
-│   ├── utils.ts         # Terminal formatting, badges, prompts (zero-dep)
+│   ├── diff.ts          # Myers' diff algorithm (zero-dependency)
+│   ├── git.ts           # Git operations (branching, committing)
+│   ├── utils.ts         # Terminal formatting, badges, prompts (zero-dep ANSI)
+│   ├── index.ts         # Public SDK exports
 │   └── commands/
-│       ├── chat.ts      # Interactive REPL (budget + dry-run + verbose)
+│       ├── chat.ts      # Interactive REPL (ChatSession + ChatUI abstraction)
 │       ├── verify.ts    # Codebase ↔ Memory scanner (dry-run aware)
 │       ├── dream.ts     # Memory compression (dry-run aware)
 │       └── stats.ts     # Budget analytics reporter
