@@ -13,6 +13,9 @@ import {
 } from '../memory.js';
 import { sendMessage } from '../client.js';
 import { c, heading, hr, Spinner, success, info, warn, dryRunBadge } from '../utils.js';
+import { saveSessionMetric } from '../metrics.js';
+import { COST_PER_INPUT_TOKEN, COST_PER_OUTPUT_TOKEN } from '../config.js';
+import * as path from 'node:path';
 
 // ── Dream Command ────────────────────────────────────────────
 export async function dreamCommand(options: {
@@ -118,6 +121,20 @@ export async function dreamCommand(options: {
       `✅ ${ratio}% reduction`,
       dryRun,
     );
+    
+    // Save metric
+    const costUSD = (response.inputTokens * COST_PER_INPUT_TOKEN) + (response.outputTokens * COST_PER_OUTPUT_TOKEN);
+    saveSessionMetric({
+      command: 'dream',
+      project: path.basename(process.cwd()),
+      inputTokens: response.inputTokens,
+      outputTokens: response.outputTokens,
+      turns: 1,
+      costUSD,
+      durationMs: 0, // Not easily trackable without start time, 0 is fine
+      timestamp: new Date().toISOString(),
+    });
+
   } catch (err: any) {
     spinner.stop();
     console.error(`\n${c.red}✖ Dream failed: ${err.message}${c.reset}`);
