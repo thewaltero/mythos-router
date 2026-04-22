@@ -343,3 +343,9 @@ export function printVerboseParse(output: string): void {
   console.log(`\n${verboseBadge()} ${c.dim}── Parse Trace (${actions.length}) ──${c.reset}`);
   for (const action of actions) printVerboseAction(action);
 }
+
+// ── Summary Helper ───────────────────────────────────────────
+export function summarizeActions(output: string, userInput: string): string {
+  const actions = parseActions(output);
+  return actions.length > 0 ? actions.map(a => `${a.operation}: ${a.path}`).join('; ') : `chat: ${userInput.slice(0, 80)}`;
+}
