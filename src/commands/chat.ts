@@ -5,407 +5,242 @@
 // ─────────────────────────────────────────────────────────────
 
 import * as readline from 'node:readline';
-import {
-  streamMessage,
-  formatTokenUsage,
-  type Message,
-  type MythosResponse,
-} from '../client.js';
-import {
-  SWDEngine,
-  parseActions,
-  printSWDResults,
-  dryRunSWD,
-  printVerboseParse,
-  resolveSafePath,
-  type FileAction,
-} from '../swd.js';
-import { saveSessionMetric } from '../metrics.js';
 import * as path from 'node:path';
-import {
-  appendEntry,
-  appendMetadataBlock,
-  needsDream,
-  printMemoryStatus,
-  getMemoryContext,
-} from '../memory.js';
-import {
-  type EffortLevel,
-  MAX_CORRECTION_RETRIES,
-  BUDGET_WARN_PERCENT,
-  MODELS,
-} from '../config.js';
-import { c, Spinner, BANNER, hr, heading, dryRunBadge, verboseBadge, error as logError, warn as logWarn, success as logSuccess } from '../utils.js';
+import { streamMessage, formatTokenUsage, type Message, type MythosResponse } from '../client.js';
+import { SWDEngine, parseActions, printSWDResults, dryRunSWD, printVerboseParse, resolveSafePath, summarizeActions, type FileAction, type SWDRunResult } from '../swd.js';
+import { saveSessionMetric } from '../metrics.js';
+import { appendEntry, appendMetadataBlock, needsDream, getMemoryContext, printMemoryStatus } from '../memory.js';
+import { type EffortLevel, MAX_CORRECTION_RETRIES, MODELS, validateApiKey } from '../config.js';
+import { c, Spinner, BANNER, hr, heading, dryRunBadge, error as logError, warn as logWarn, success as logSuccess } from '../utils.js';
 import { SessionBudget } from '../budget.js';
-import {
-  isGitRepo,
-  hasUncommittedChanges,
-  getCurrentBranch,
-  createAndCheckoutBranch,
-  commitChanges,
-  getLatestHash,
-} from '../git.js';
+import { isGitRepo, hasUncommittedChanges, getCurrentBranch, commitChanges, getLatestHash, createAndCheckoutBranch } from '../git.js';
 
-// ── Chat Command Options ─────────────────────────────────────
-interface ChatOptions {
-  effort?: string;
-  maxTokens?: string;
-  maxTurns?: string;
-  budget?: boolean;      // Commander uses --no-budget → budget=false
-  dryRun?: boolean;
-  verbose?: boolean;
-  branch?: string;
+// ── UI Abstraction ──────────────────────────────────────────
+export interface ChatUI {
+  startLoading(msg: string): void;
+  updateLoading(msg: string): void;
+  stopLoading(msg?: string): void;
+  log(msg: string): void;
+  warn(msg: string): void;
+  error(msg: string): void;
+  success(msg: string): void;
+  divider(): void;
 }
 
-// ── Chat Command ─────────────────────────────────────────────
-export async function chatCommand(options: ChatOptions): Promise<void> {
-  const effort = (options.effort ?? 'high') as EffortLevel;
-  const dryRun = options.dryRun === true;
-  const verbose = options.verbose === true;
+// ── Chat Session Manager ─────────────────────────────────────
+class ChatSession {
+  public history: Message[] = [];
+  public budget: SessionBudget;
+  public engine: SWDEngine;
+  public options: ChatOptions;
+  private ui: ChatUI;
 
-  // ── Initialize Budget ────────────────────────────────────
-  const budgetEnabled = options.budget !== false;
-  const budget = new SessionBudget(
-    {
-      maxTokens: parseInt(options.maxTokens ?? '500000', 10) || 500_000,
-      maxTurns: parseInt(options.maxTurns ?? '25', 10) || 25,
-    },
-    budgetEnabled,
-  );
+  constructor(options: ChatOptions, ui: ChatUI) {
+    this.options = options;
+    this.ui = ui;
+    this.budget = new SessionBudget(
+      {
+        maxTokens: parseInt(options.maxTokens ?? '500000', 10) || 500_000,
+        maxTurns: parseInt(options.maxTurns ?? '25', 10) || 25,
+      },
+      options.budget !== false,
+    );
+    this.engine = new SWDEngine({ 
+      strict: true, 
+      enableRollback: true,
+      onAction: (a) => this.ui.updateLoading(`Executing: ${c.cyan}${a.operation}${c.reset} ${a.path}...`),
+      onVerify: (r) => this.ui.updateLoading(`Verifying: ${r.action.path}...`),
+      onRollback: (p, s, e) => {
+        if (s) this.ui.updateLoading(`Rolled back: ${p}`);
+        else this.ui.updateLoading(`${c.red}Rollback failed${c.reset}: ${p} (${e})`);
+      }
+    });
+  }
 
-  // ── Sandbox Branching ────────────────────────────────────
-  let sandboxBranch: string | null = null;
-  if (options.branch) {
-    if (!isGitRepo()) {
-      logError('Not a git repository. Cannot use --branch flag.');
-      process.exit(1);
+  public async initialize() {
+    const context = await getMemoryContext();
+    if (context) {
+      this.history.push({ 
+        role: 'user', 
+        content: `[CONTEXT: RECENT MEMORY]\n${context}` 
+      });
+      this.history.push({ 
+        role: 'assistant', 
+        content: "Acknowledged. I have restored context from memory." 
+      });
     }
+  }
+
+  public async setupSandbox(): Promise<string | null> {
+    if (!this.options.branch) return null;
+    
+    if (!isGitRepo()) throw new Error('Not a git repository. Cannot use --branch flag.');
+    if (hasUncommittedChanges()) throw new Error('Uncommitted changes detected. Please commit or stash before sandboxing.');
 
     const current = getCurrentBranch();
-    if (current.startsWith('mythos/')) {
-      logError(`Already inside a mythos branch session: ${c.bold}${current}${c.reset}`);
-      logError('Nested sandboxing is blocked to prevent Git ambiguity.');
-      process.exit(1);
-    }
+    if (current.startsWith('mythos/')) throw new Error(`Already inside a mythos branch: ${current}. Nested sandboxing blocked.`);
 
-    if (hasUncommittedChanges()) {
-      logError('Uncommitted changes detected in working tree.');
-      logError('Please commit or stash your changes before starting a sandboxed session.');
-      process.exit(1);
-    }
-
-    // Generate unique branch name: mythos/<name>-YYYYMMDD-HHMM
-    const timestampStr = new Date()
-      .toISOString()
-      .replace(/[-T:]/g, '')
-      .slice(0, 12); // YYYYMMDDHHMM
+    const timestampStr = new Date().toISOString().replace(/[-T:]/g, '').slice(0, 12);
+    const branchName = `mythos/${this.options.branch}-${timestampStr}`;
     
-    const formattedTimestamp = `${timestampStr.slice(0, 8)}-${timestampStr.slice(8)}`;
-    const sanitizedName = options.branch
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-|-$/g, '');
-
-    sandboxBranch = `mythos/${sanitizedName}-${formattedTimestamp}`;
-
-    try {
-      createAndCheckoutBranch(sandboxBranch);
-    } catch (err: any) {
-      logError(`Failed to create sandbox branch: ${err.message}`);
-      process.exit(1);
-    }
+    logSuccess(`Creating sandbox branch: ${c.bold}${branchName}${c.reset}`);
+    createAndCheckoutBranch(branchName);
+    return branchName;
   }
 
-  // ── Banner ───────────────────────────────────────────────
-  console.log(BANNER);
+  public async processInput(input: string): Promise<void> {
+    this.history.push({ role: 'user', content: input });
+    this.ui.startLoading('Capybara is thinking...');
 
-  // Mode badges
-  const modes: string[] = [];
-  modes.push(`${c.dim}effort: ${c.cyan}${effort}${c.reset}`);
-  modes.push(`${c.dim}model: ${c.cyan}${MODELS[effort]}${c.reset}`);
-  modes.push(`${c.dim}swd: ${c.green}active${c.reset}`);
-  if (dryRun) modes.push(dryRunBadge());
-  if (verbose) modes.push(verboseBadge());
-  if (!budgetEnabled) modes.push(`${c.yellow}budget: disabled${c.reset}`);
-  console.log(`  ${modes.join(' · ')}`);
-
-  if (sandboxBranch) {
-    console.log(`  ${c.green}✔ Sandbox mode enabled${c.reset}`);
-    console.log(`  ${c.dim}branch: ${c.bold}${sandboxBranch}${c.reset}`);
-  }
-
-  if (dryRun) {
-    console.log(`  ${dryRunBadge()} ${c.dim}Filesystem writes previewed. API calls execute normally.${c.reset}`);
-  }
-
-  // Budget display
-  if (budgetEnabled) {
-    const snap = budget.status();
-    console.log(
-      `${c.dim}  budget: ${c.cyan}${snap.maxTokens.toLocaleString()}${c.dim} token limit · ` +
-      `${c.cyan}${snap.maxTurns}${c.dim} turn limit · ` +
-      `${c.green}${BUDGET_WARN_PERCENT}%${c.dim} warning threshold${c.reset}`,
-    );
-  }
-
-  printMemoryStatus();
-  console.log(hr());
-
-  const helpItems = [
-    `${c.cyan}/exit${c.dim} quit`,
-    `${c.cyan}/dream${c.dim} compress memory`,
-    `${c.cyan}/budget${c.dim} show budget`,
-    `${c.cyan}/clear${c.dim} reset conversation`,
-  ];
-  console.log(`${c.dim}  Commands: ${helpItems.join(' · ')}${c.reset}\n`);
-
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    prompt: `${c.green}❯${c.reset} `,
-  });
-
-  const conversationHistory: Message[] = [];
-  const spinner = new Spinner();
-
-  // Inject memory context as first user message context
-  const memCtx = getMemoryContext();
-  if (memCtx) {
-    conversationHistory.push({
-      role: 'user',
-      content: `[MEMORY CONTEXT — Previous session state]\n${memCtx}\n[/MEMORY CONTEXT]\n\nAcknowledge memory loaded. Ready for instructions.`,
-    });
-    conversationHistory.push({
-      role: 'assistant',
-      content: 'Memory loaded. Capybara tier active. Strict Write Discipline engaged. Ready.',
-    });
-  }
-
-  rl.prompt();
-
-  rl.on('line', async (line: string) => {
-    const input = line.trim();
-
-    if (!input) {
-      rl.prompt();
-      return;
-    }
-
-    // ── Handle slash commands ──────────────────────────────
-    if (input === '/exit' || input === '/quit' || input === '/q') {
-      // Show final budget summary
-      if (budgetEnabled && budget.status().turns > 0) {
-        console.log(`\n${budget.formatBar()}`);
-      }
-
-      if (sandboxBranch) {
-        console.log(`\n${c.green}✔ Session complete${c.reset} ${c.dim}(branch: ${c.bold}${sandboxBranch}${c.dim})${c.reset}`);
-      }
-
-      // ── Session Finalization (Auto-Commit + Metadata) ──
-      await finalizeSession(sandboxBranch, dryRun);
-
-      console.log(`\n${c.dim}Capybara signing off. 🐾${c.reset}\n`);
-      shutdown();
-    }
-
-    if (input === '/dream') {
-      console.log(`${c.dim}Use ${c.cyan}mythos dream${c.dim} command for memory compression.${c.reset}`);
-      rl.prompt();
-      return;
-    }
-
-    if (input === '/memory') {
-      printMemoryStatus();
-      rl.prompt();
-      return;
-    }
-
-    if (input === '/budget') {
-      console.log(`\n${budget.formatBar()}`);
-      rl.prompt();
-      return;
-    }
-
-    if (input === '/clear') {
-      conversationHistory.length = 0;
-      console.log(`${c.dim}Conversation cleared. Memory persists in MEMORY.md.${c.reset}`);
-      rl.prompt();
-      return;
-    }
-
-    // ── Budget Pre-Check ──────────────────────────────────
-    const budgetCheck = budget.check();
-    if (!budgetCheck.ok) {
-      // ── Graceful Save: persist progress before stopping ──
-      const summary = budget.formatSessionSummary();
-      appendEntry(summary, '⏸ Session paused — budget reached', dryRun);
-      
-      // Finalize session with metadata
-      await finalizeSession(sandboxBranch, dryRun);
-
-      const warning = budget.formatWarning();
-      if (warning) console.log(`\n${warning}`);
-      console.log(`\n${budget.formatBar()}`);
-      shutdown();
-    }
-
-    // Add user message
-    conversationHistory.push({ role: 'user', content: input });
-
-    // ── Stream response ───────────────────────────────────
-    spinner.start('Capybara is thinking...');
-    let thinkingStarted = false;
-    let streamStarted = false;
     let thinkingTokens = 0;
+    let streamStarted = false;
 
     try {
       const response = await streamMessage(
-        conversationHistory,
-        effort,
-        // onThinkingDelta
+        this.history,
+        this.options.effort as EffortLevel || 'high',
         (delta) => {
-          if (!thinkingStarted) {
-            if (verbose) {
-              spinner.stop();
-              process.stdout.write(`\n${c.dim}${c.italic}💭 `);
-            }
-            thinkingStarted = true;
-          }
-          if (verbose) {
-            // Full thinking output in verbose mode
-            process.stdout.write(`${c.dim}${delta}`);
-          } else {
-            thinkingTokens += Math.ceil(delta.length / 4);
-            spinner.update(`Thinking (${MODELS[effort]})... ${c.yellow}~${thinkingTokens} tokens${c.reset}`);
-          }
+          thinkingTokens += Math.ceil(delta.length / 4);
+          this.ui.updateLoading(`Thinking... ${c.yellow}~${thinkingTokens} tokens${c.reset}`);
         },
-        // onTextDelta
         (delta) => {
           if (!streamStarted) {
-            if (thinkingStarted && verbose) {
-              process.stdout.write(`${c.reset}\n\n`);
-            } else {
-              const msg = thinkingTokens > 0 
-                ? `${c.green}✔${c.reset} ${c.dim}Thought process complete (~${thinkingTokens} tokens)${c.reset}`
-                : `${c.green}✔${c.reset} ${c.dim}Ready${c.reset}`;
-              spinner.stop(msg);
-              process.stdout.write('\n');
-            }
+            this.ui.stopLoading(`${c.green}✔${c.reset} ${c.dim}Reasoning complete${c.reset}\n`);
             streamStarted = true;
           }
           process.stdout.write(delta);
         },
       );
 
-      if (!streamStarted) {
-        spinner.stop();
-        process.stdout.write('\n' + response.text);
-      }
       process.stdout.write('\n');
+      this.history.push({ role: 'assistant', content: response.text });
+      this.budget.record(response.inputTokens, response.outputTokens);
 
-      // Add to history
-      conversationHistory.push({ role: 'assistant', content: response.text });
+      if (this.options.verbose) printVerboseParse(response.text);
 
-      // ── Record budget ──────────────────────────────────
-      budget.record(response.inputTokens, response.outputTokens);
+      await this.handleSWD(response.text, input);
 
-      // ── Verbose: Show parse trace ──────────────────────
-      if (verbose) {
-        printVerboseParse(response.text);
-      }
+      this.ui.log(`\n${formatTokenUsage(response)}`);
+      this.ui.log(this.budget.formatBar());
+      
+      const warning = this.budget.formatWarning();
+      if (warning) this.ui.warn(`\n${warning}`);
 
-      // ── SWD Check (Normal vs Dry-Run) ──────────────────
-      const actions = parseActions(response.text);
-
-      if (dryRun) {
-        // Dry-run: preview and ask for confirmation
-        const dryResult = await dryRunSWD(actions);
-        if (dryResult.rejected.length > 0) {
-          appendEntry(
-            `dry-run: ${dryResult.rejected.length} action(s) rejected`,
-            '⚠️ User rejected file operations',
-            dryRun,
-          );
-        }
-        // In dry run, we don't actually run the engine for real effects
-        if (dryResult.accepted.length > 0) {
-           appendEntry(
-            `dry-run: ${dryResult.accepted.length} action(s) accepted`,
-            '✅ User would accept these operations',
-            dryRun,
-          );
-        }
-      } else {
-        spinner.start('Verifying and applying changes...');
-        
-        const engine = new SWDEngine({ 
-          strict: true, 
-          enableRollback: true,
-          onAction: (a) => spinner.update(`Executing: ${c.cyan}${a.operation}${c.reset} ${a.path}...`),
-          onVerify: (r) => spinner.update(`Verifying: ${r.action.path}...`),
-          onRollback: (p, s, e) => {
-            if (s) spinner.update(`Rolled back: ${p}`);
-            else spinner.update(`${c.red}Rollback failed${c.reset}: ${p} (${e})`);
-          }
-        });
-        const swdResult = await engine.run(actions);
-        
-        spinner.stop();
-        printSWDResults(swdResult);
-
-        // Correction loop
-        if (!swdResult.success) {
-          await correctionLoop(
-            conversationHistory,
-            swdResult,
-            effort,
-            spinner,
-            budget,
-            dryRun,
-          );
-        }
-
-        // ── Memory Write ──────────────────────────────────
-        const actionSummary = summarizeActions(response.text, input);
-        const verifyStatus = swdResult.success
-          ? '✅ verified'
-          : `⚠️ ${swdResult.results.filter((r) => r.status !== 'verified').length} issues`;
-        appendEntry(actionSummary, verifyStatus, dryRun);
-      }
-
-      // Token usage
-      console.log(`\n${formatTokenUsage(response)}`);
-
-      // Budget bar
-      console.log(budget.formatBar());
-
-      // Budget warning
-      const budgetWarning = budget.formatWarning();
-      if (budgetWarning) {
-        console.log(`\n${budgetWarning}`);
-      }
-
-      // Dream check
       if (needsDream()) {
-        console.log(
-          `\n${c.yellow}💤 Memory approaching capacity. Run ${c.cyan}mythos dream${c.yellow} to compress.${c.reset}`,
-        );
+        this.ui.warn(`\n${c.yellow}💤 Memory approaching capacity. Run ${c.cyan}mythos dream${c.yellow} to compress.${c.reset}`);
       }
     } catch (err: any) {
-      spinner.stop();
-      console.error(`\n${c.red}✖ API Error: ${err.message}${c.reset}`);
-      // Remove the failed user message from history
-      conversationHistory.pop();
+      this.ui.stopLoading();
+      this.ui.error(`API Error: ${err.message}`);
+      this.history.pop();
+    }
+  }
+
+  private async handleSWD(responseText: string, userInput: string): Promise<void> {
+    const actions = parseActions(responseText);
+    if (actions.length === 0) {
+      appendEntry(`chat: ${userInput.slice(0, 80)}`, '✅ clear', this.options.dryRun);
+      return;
     }
 
-    console.log(hr());
-    rl.prompt();
-  });
+    if (this.options.dryRun) {
+      const dryResult = await dryRunSWD(actions);
+      appendEntry(
+        summarizeActions(responseText, userInput), 
+        `🛠️ dry-run: ${dryResult.accepted.length} accepted, ${dryResult.rejected.length} rejected`,
+        true
+      );
+      return;
+    }
 
-  function shutdown() {
-    const snap = budget.status();
+    this.ui.startLoading('Verifying and applying changes...');
+    const result = await this.engine.run(actions);
+    this.ui.stopLoading();
+    printSWDResults(result);
+
+    if (!result.success) {
+      await this.runCorrectionLoop(result);
+    }
+
+    const status = result.success ? '✅ verified' : `⚠️ ${result.results.filter(r => r.status !== 'verified').length} issues`;
+    appendEntry(summarizeActions(responseText, userInput), status, false);
+  }
+
+  private async runCorrectionLoop(lastResult: SWDRunResult): Promise<void> {
+    for (let attempt = 1; attempt <= MAX_CORRECTION_RETRIES; attempt++) {
+      const budgetCheck = this.budget.check();
+      if (!budgetCheck.ok) {
+        this.ui.warn('Correction aborted — budget exhausted.');
+        return;
+      }
+
+      this.ui.log(`\n${c.yellow}⟲ SWD Correction Turn ${attempt}/${MAX_CORRECTION_RETRIES}${c.reset}`);
+      
+      const failures = lastResult.results
+        .filter(r => ['failed', 'drift'].includes(r.status))
+        .map(r => `- [${r.status.toUpperCase()}] ${r.action.operation} ${r.action.path}: ${r.detail}`)
+        .join('\n');
+
+      const prompt = `[SWD CORRECTION TURN]\nFile actions failed verification:\n${failures}\n\nPlease correct your response. Attempts remaining: ${MAX_CORRECTION_RETRIES - (attempt - 1)}`;
+      
+      this.history.push({ role: 'user', content: prompt });
+      this.ui.startLoading(`Correction attempt ${attempt}...`);
+
+      let streamStarted = false;
+      try {
+        const response = await streamMessage(
+          this.history,
+          this.options.effort as EffortLevel || 'high',
+          () => {}, // simple spinner
+          (delta) => {
+            if (!streamStarted) {
+              this.ui.stopLoading('\n');
+              streamStarted = true;
+            }
+            process.stdout.write(delta);
+          }
+        );
+
+        process.stdout.write('\n');
+        this.history.push({ role: 'assistant', content: response.text });
+        this.budget.record(response.inputTokens, response.outputTokens);
+
+        this.ui.startLoading('Verifying corrected actions...');
+        const result = await this.engine.run(parseActions(response.text));
+        this.ui.stopLoading();
+        printSWDResults(result);
+
+        if (result.success) {
+          this.ui.success('Correction successful.');
+          return;
+        }
+
+        if (attempt >= MAX_CORRECTION_RETRIES) {
+          this.ui.error('Max corrections reached. Yielding to human.');
+          return;
+        }
+        lastResult = result;
+      } catch (err: any) {
+        this.ui.stopLoading();
+        this.ui.error(`Correction failed: ${err.message}`);
+        return;
+      }
+    }
+  }
+
+  public async finalize(sandboxBranch: string | null) {
+    let commitHash = 'none';
+    const repo = isGitRepo();
+    if (repo && !this.options.dryRun) {
+      try {
+        if (hasUncommittedChanges()) commitChanges('mythos: session end');
+        commitHash = getLatestHash();
+      } catch (err: any) { logWarn(`Auto-commit failed: ${err.message}`); }
+    }
+    const metadata = { commit: commitHash, branch: sandboxBranch || (repo ? getCurrentBranch() : 'none'), timestamp_end: new Date().toISOString() };
+    appendMetadataBlock(metadata, this.options.dryRun || false);
+
+    const snap = this.budget.status();
     if (snap.totalTokens > 0) {
       saveSessionMetric({
         command: 'chat',
@@ -418,173 +253,80 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
         timestamp: new Date().toISOString(),
       });
     }
-    rl.close();
-    process.exit(0);
+  }
+}
+
+// ── Terminal Implementation of ChatUI ────────────────────────
+class TerminalUI implements ChatUI {
+  private spinner: Spinner;
+
+  constructor(spinner: Spinner) {
+    this.spinner = spinner;
   }
 
-  rl.on('close', () => {
-    shutdown();
+  startLoading(msg: string) { this.spinner.start(msg); }
+  updateLoading(msg: string) { this.spinner.update(msg); }
+  stopLoading(msg?: string) { this.spinner.stop(msg); }
+  log(msg: string) { console.log(msg); }
+  warn(msg: string) { logWarn(msg); }
+  error(msg: string) { logError(msg); }
+  success(msg: string) { logSuccess(msg); }
+  divider() { console.log(hr()); }
+}
+
+// ── Command Interface ────────────────────────────────────────
+interface ChatOptions {
+  effort?: string;
+  maxTokens?: string;
+  maxTurns?: string;
+  budget?: boolean;
+  dryRun?: boolean;
+  verbose?: boolean;
+  branch?: string;
+}
+
+export async function chatCommand(options: ChatOptions): Promise<void> {
+  validateApiKey();
+  const ui = new TerminalUI(new Spinner());
+  const session = new ChatSession(options, ui);
+
+  ui.log(BANNER);
+  ui.log(heading(`CHAT SESSION :: ${MODELS.high.toUpperCase()}`));
+  if (options.dryRun) ui.log(`  ${c.bgYellow}${c.black}${c.bold} DRY-RUN MODE ACTIVE ${c.reset}\n`);
+
+  let sandboxBranch: string | null = null;
+  try {
+    sandboxBranch = await session.setupSandbox();
+    await session.initialize();
+  } catch (err: any) {
+    ui.error(err.message);
+    process.exit(1);
+  }
+
+  printMemoryStatus();
+  ui.divider();
+
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    prompt: `${c.magenta}${c.bold}mythos > ${c.reset}`,
   });
-}
 
-// ── Correction Loop ──────────────────────────────────────────
-async function correctionLoop(
-  history: Message[],
-  lastResult: SWDRunResult,
-  effort: EffortLevel,
-  spinner: Spinner,
-  budget: SessionBudget,
-  dryRun: boolean,
-): Promise<void> {
-  for (let attempt = 1; attempt <= MAX_CORRECTION_RETRIES; attempt++) {
-    // Budget check before correction
-    const budgetCheck = budget.check();
-    if (!budgetCheck.ok) {
-      console.log(`\n${budget.formatWarning()}`);
-      console.log(`${c.dim}Correction aborted — budget exhausted.${c.reset}`);
-      return;
-    }
+  rl.prompt();
 
-    console.log(
-      `\n${c.yellow}⟲ SWD Correction Turn ${attempt}/${MAX_CORRECTION_RETRIES}${c.reset}`,
-    );
+  rl.on('line', async (line) => {
+    const input = line.trim();
+    if (!input) { rl.prompt(); return; }
+    if (['exit', 'quit', '/q'].includes(input.toLowerCase())) { rl.close(); return; }
 
-    const failures = lastResult.results
-      .filter((r) => ['failed', 'drift'].includes(r.status))
-      .map((r) => `- [${r.status.toUpperCase()}] ${r.action.operation} ${r.action.path}: ${r.detail}`)
-      .join('\n');
+    await session.processInput(input);
+    ui.divider();
+    rl.prompt();
+  });
 
-    const correctionPrompt = `[SWD CORRECTION TURN]\nFile actions failed verification:\n${failures}\n\nPlease correct your response. Attempts remaining: ${MAX_CORRECTION_RETRIES - (attempt - 1)}`;
-
-    history.push({ role: 'user', content: correctionPrompt });
-
-    spinner.start(`Correction attempt ${attempt}...`);
-    let thinkingTokens = 0;
-    let streamStarted = false;
-
-    try {
-      const correctionResponse = await streamMessage(
-        history,
-        effort,
-        (delta) => {
-          thinkingTokens += Math.ceil(delta.length / 4);
-          spinner.update(`Correction attempt ${attempt}... ${c.yellow}~${thinkingTokens} tokens${c.reset}`);
-        },
-        (delta) => {
-          if (!streamStarted) {
-            spinner.stop(`${c.green}✔${c.reset} ${c.dim}Correction thought process complete${c.reset}`);
-            process.stdout.write('\n');
-            streamStarted = true;
-          }
-          process.stdout.write(delta);
-        },
-      );
-
-      process.stdout.write('\n');
-      history.push({
-        role: 'assistant',
-        content: correctionResponse.text,
-      });
-
-      // Record budget for correction turn
-      budget.record(correctionResponse.inputTokens, correctionResponse.outputTokens);
-
-      spinner.start('Running SWD Verification...');
-      const engine = new SWDEngine({ 
-        strict: true, 
-        enableRollback: true,
-        onAction: (a) => spinner.update(`Applying: ${c.cyan}${a.operation}${c.reset} ${a.path}...`),
-        onVerify: (r) => spinner.update(`Verifying: ${r.action.path}...`),
-        onRollback: (p, s, e) => {
-          if (s) spinner.update(`Rolled back: ${p}`);
-          else spinner.update(`${c.red}Rollback failed${c.reset}: ${p} (${e})`);
-        }
-      });
-      const swdResult = await engine.run(parseActions(correctionResponse.text));
-      spinner.stop();
-      printSWDResults(swdResult);
-
-      if (swdResult.success) {
-        console.log(`${c.green}✔ Correction successful.${c.reset}`);
-        return;
-      }
-
-      if (attempt >= MAX_CORRECTION_RETRIES) {
-        console.log(
-          `\n${c.red}✖ Max corrections reached. Yielding to human.${c.reset}`,
-        );
-        appendEntry(
-          'SWD: Max corrections reached',
-          '❌ Yielded to human after ' + MAX_CORRECTION_RETRIES + ' attempts',
-          dryRun,
-        );
-        return;
-      }
-
-      // Update for next attempt
-      lastResult = swdResult;
-    } catch (err: any) {
-      spinner.stop();
-      console.error(
-        `${c.red}✖ Correction failed: ${err.message}${c.reset}`,
-      );
-      return;
-    }
-  }
-}
-
-// ── Helpers ──────────────────────────────────────────────────
-
-// Extract file paths referenced in FILE_ACTION blocks and resolve them safely.
-// Only these files are snapshotted — avoids hashing the entire project tree.
-function extractReferencedPaths(modelOutput: string): string[] {
-  const actions = parseActions(modelOutput);
-  const paths: string[] = [];
-  for (const action of actions) {
-    try {
-      paths.push(resolveSafePath(action.path));
-    } catch {
-      // Path traversal blocked — skip silently
-    }
-  }
-  return paths;
-}
-
-function summarizeActions(output: string, userInput: string): string {
-  const actions = parseActions(output);
-  if (actions.length > 0) {
-    return actions.map((a) => `${a.operation}: ${a.path}`).join('; ');
-  }
-  // Fallback: first 80 chars of user input
-  return `chat: ${userInput.slice(0, 80)}`;
-}
-
-/**
- * Handles deterministic session finalization:
- * 1. Auto-commits changes (if git and dirty)
- * 2. Records commit hash and branch in MEMORY.md metadata block
- */
-async function finalizeSession(sandboxBranch: string | null, dryRun: boolean): Promise<void> {
-  let commitHash = 'none';
-  const repo = isGitRepo();
-
-  if (repo && !dryRun) {
-    try {
-      if (hasUncommittedChanges()) {
-        commitChanges('mythos: session end');
-      }
-      commitHash = getLatestHash();
-    } catch (err: any) {
-      logWarn(`Auto-commit failed: ${err.message}`);
-    }
-  }
-
-  const metadata: Record<string, string> = {
-    commit: commitHash,
-    branch: sandboxBranch || (repo ? getCurrentBranch() : 'none'),
-    timestamp_end: new Date().toISOString(),
-  };
-
-  appendMetadataBlock(metadata, dryRun);
+  rl.on('close', async () => {
+    await session.finalize(sandboxBranch);
+    process.exit(0);
+  });
 }
 
