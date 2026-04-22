@@ -8,6 +8,7 @@ import { Command } from 'commander';
 import { chatCommand } from './commands/chat.js';
 import { verifyCommand } from './commands/verify.js';
 import { dreamCommand } from './commands/dream.js';
+import { statsCommand } from './commands/stats.js';
 import {
   DEFAULT_MAX_TOKENS_PER_SESSION,
   DEFAULT_MAX_TURNS,
@@ -21,7 +22,7 @@ program
     'Capybara-tier CLI router — Claude Opus 4.7 with Adaptive Thinking, ' +
     'Strict Write Discipline, and Self-Healing Memory.',
   )
-  .version('1.1.8');
+  .version('1.1.9');
 
 // ── mythos chat ──────────────────────────────────────────────
 program
@@ -85,6 +86,15 @@ program
   )
   .action(async (options) => {
     await dreamCommand(options);
+  });
+
+// ── mythos stats ─────────────────────────────────────────────
+program
+  .command('stats')
+  .description('Show budget analytics and token usage across sessions')
+  .option('-d, --days <n>', 'Filter metrics by the last N days')
+  .action(async (options) => {
+    await statsCommand(options);
   });
 
 // ── Default: show help ───────────────────────────────────────
