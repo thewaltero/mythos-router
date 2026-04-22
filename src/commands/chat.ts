@@ -12,13 +12,13 @@ import {
   type MythosResponse,
 } from '../client.js';
 import {
-  snapshotFiles,
-  runSWD,
+  SWDEngine,
+  parseActions,
   printSWDResults,
-  parseFileActions,
   dryRunSWD,
   printVerboseParse,
   resolveSafePath,
+  type FileAction,
 } from '../swd.js';
 import { saveSessionMetric } from '../metrics.js';
 import * as path from 'node:path';
@@ -317,9 +317,11 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
       }
 
       // ── SWD Check (Normal vs Dry-Run) ──────────────────
+      const actions = parseActions(response.text);
+
       if (dryRun) {
         // Dry-run: preview and ask for confirmation
-        const dryResult = await dryRunSWD(response.text);
+        const dryResult = await dryRunSWD(actions);
         if (dryResult.rejected.length > 0) {
           appendEntry(
             `dry-run: ${dryResult.rejected.length} action(s) rejected`,
@@ -327,32 +329,37 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
             dryRun,
           );
         }
+        // In dry run, we don't actually run the engine for real effects
         if (dryResult.accepted.length > 0) {
-          appendEntry(
+           appendEntry(
             `dry-run: ${dryResult.accepted.length} action(s) accepted`,
             '✅ User would accept these operations',
             dryRun,
           );
         }
       } else {
-        spinner.start('Parsing FILE_ACTION blocks...');
-        // Lazy snapshot: only snapshot files referenced in FILE_ACTION blocks
-        const referencedPaths = extractReferencedPaths(response.text);
+        spinner.start('Verifying and applying changes...');
         
-        spinner.update('Verifying Strict Write Discipline...');
-        const beforeSnapshots = snapshotFiles(referencedPaths);
-
-        // Normal mode: verify against filesystem
-        const swdResult = runSWD(response.text, beforeSnapshots);
+        const engine = new SWDEngine({ 
+          strict: true, 
+          enableRollback: true,
+          onAction: (a) => spinner.update(`Executing: ${c.cyan}${a.operation}${c.reset} ${a.path}...`),
+          onVerify: (r) => spinner.update(`Verifying: ${r.action.path}...`),
+          onRollback: (p, s, e) => {
+            if (s) spinner.update(`Rolled back: ${p}`);
+            else spinner.update(`${c.red}Rollback failed${c.reset}: ${p} (${e})`);
+          }
+        });
+        const swdResult = await engine.run(actions);
+        
         spinner.stop();
         printSWDResults(swdResult);
 
         // Correction loop
-        if (!swdResult.verified && swdResult.correctionPrompt) {
+        if (!swdResult.success) {
           await correctionLoop(
             conversationHistory,
-            swdResult.correctionPrompt,
-            beforeSnapshots,
+            swdResult,
             effort,
             spinner,
             budget,
@@ -362,9 +369,9 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
 
         // ── Memory Write ──────────────────────────────────
         const actionSummary = summarizeActions(response.text, input);
-        const verifyStatus = swdResult.verified
+        const verifyStatus = swdResult.success
           ? '✅ verified'
-          : `⚠️ ${swdResult.actions.filter((a) => a.status !== 'verified').length} issues`;
+          : `⚠️ ${swdResult.results.filter((r) => r.status !== 'verified').length} issues`;
         appendEntry(actionSummary, verifyStatus, dryRun);
       }
 
@@ -423,8 +430,7 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
 // ── Correction Loop ──────────────────────────────────────────
 async function correctionLoop(
   history: Message[],
-  correctionPrompt: string,
-  initialSnapshots: Map<string, any>,
+  lastResult: SWDRunResult,
   effort: EffortLevel,
   spinner: Spinner,
   budget: SessionBudget,
@@ -442,6 +448,13 @@ async function correctionLoop(
     console.log(
       `\n${c.yellow}⟲ SWD Correction Turn ${attempt}/${MAX_CORRECTION_RETRIES}${c.reset}`,
     );
+
+    const failures = lastResult.results
+      .filter((r) => ['failed', 'drift'].includes(r.status))
+      .map((r) => `- [${r.status.toUpperCase()}] ${r.action.operation} ${r.action.path}: ${r.detail}`)
+      .join('\n');
+
+    const correctionPrompt = `[SWD CORRECTION TURN]\nFile actions failed verification:\n${failures}\n\nPlease correct your response. Attempts remaining: ${MAX_CORRECTION_RETRIES - (attempt - 1)}`;
 
     history.push({ role: 'user', content: correctionPrompt });
 
@@ -477,11 +490,21 @@ async function correctionLoop(
       budget.record(correctionResponse.inputTokens, correctionResponse.outputTokens);
 
       spinner.start('Running SWD Verification...');
-      const swdResult = runSWD(correctionResponse.text, initialSnapshots);
+      const engine = new SWDEngine({ 
+        strict: true, 
+        enableRollback: true,
+        onAction: (a) => spinner.update(`Applying: ${c.cyan}${a.operation}${c.reset} ${a.path}...`),
+        onVerify: (r) => spinner.update(`Verifying: ${r.action.path}...`),
+        onRollback: (p, s, e) => {
+          if (s) spinner.update(`Rolled back: ${p}`);
+          else spinner.update(`${c.red}Rollback failed${c.reset}: ${p} (${e})`);
+        }
+      });
+      const swdResult = await engine.run(parseActions(correctionResponse.text));
       spinner.stop();
       printSWDResults(swdResult);
 
-      if (swdResult.verified) {
+      if (swdResult.success) {
         console.log(`${c.green}✔ Correction successful.${c.reset}`);
         return;
       }
@@ -498,12 +521,8 @@ async function correctionLoop(
         return;
       }
 
-      if (swdResult.correctionPrompt) {
-        correctionPrompt = swdResult.correctionPrompt.replace(
-          /You have \d+ correction attempts remaining\./,
-          `You have ${MAX_CORRECTION_RETRIES - attempt} correction attempt(s) remaining.`,
-        );
-      }
+      // Update for next attempt
+      lastResult = swdResult;
     } catch (err: any) {
       spinner.stop();
       console.error(
@@ -519,7 +538,7 @@ async function correctionLoop(
 // Extract file paths referenced in FILE_ACTION blocks and resolve them safely.
 // Only these files are snapshotted — avoids hashing the entire project tree.
 function extractReferencedPaths(modelOutput: string): string[] {
-  const actions = parseFileActions(modelOutput);
+  const actions = parseActions(modelOutput);
   const paths: string[] = [];
   for (const action of actions) {
     try {
@@ -532,7 +551,7 @@ function extractReferencedPaths(modelOutput: string): string[] {
 }
 
 function summarizeActions(output: string, userInput: string): string {
-  const actions = parseFileActions(output);
+  const actions = parseActions(output);
   if (actions.length > 0) {
     return actions.map((a) => `${a.operation}: ${a.path}`).join('; ');
   }
