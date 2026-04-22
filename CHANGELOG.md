@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.0] — 2026-04-23
+
+### Added
+- **SWDEngine v1 API**: Transactional filesystem execution kernel with `Plan → Snapshot → Execute → Verify → Rollback` lifecycle. Single entry point: `engine.run(actions)`.
+- **ChatUI Abstraction**: Decoupled chat session logic from the terminal via a `ChatUI` interface. `ChatSession` is now a pure orchestrator, fully testable and reusable outside the CLI.
+- **TerminalUI Implementation**: CLI-specific `ChatUI` adapter wrapping the Spinner and ANSI output.
+- **SWD Lifecycle Hooks**: Extensibility layer (`onAction`, `onVerify`, `onRollback`) allowing consumers to inject logging, telemetry, or custom UI into the engine.
+- **Rollback Auditability**: `SWDRunResult.rollbackErrors` field captures and reports rollback failures instead of silently swallowing them.
+- **`swd-cli.ts`**: Separated SWD terminal presentation (verification output, dry-run preview, verbose traces) from the pure execution kernel.
+- **Git Sandbox**: `ChatSession.setupSandbox()` for automated `mythos/` branch creation with nested-sandboxing protection.
+
+### Changed
+- **SWD Kernel is now I/O-free**: `swd.ts` contains zero `console.log` calls. All presentation lives in `swd-cli.ts`.
+
+### Fixed
+- **Snapshot memoization bug**: `InternalSessionContext.getSnapshot('after')` was returning stale cached state on multi-action same-file scenarios. After snapshots now always re-read disk state.
+
+---
+
 ## [1.1.9] — 2026-04-22
 
 ### Added
@@ -115,6 +134,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Correction Turns**: max 2 retries before yielding to human.
 - **Dream/Verify Commands**: memory compression and drift detection.
 
+[1.2.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.2.0
 [1.1.9]: https://github.com/thewaltero/mythos-router/releases/tag/v1.1.9
 [1.1.8]: https://github.com/thewaltero/mythos-router/releases/tag/v1.1.8
 [1.1.7]: https://github.com/thewaltero/mythos-router/releases/tag/v1.1.7
