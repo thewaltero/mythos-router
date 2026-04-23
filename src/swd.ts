@@ -292,7 +292,9 @@ export function snapshotFile(filePath: string): FileSnapshot {
 
 export function parseActions(output: string): FileAction[] {
   const actions: FileAction[] = [];
-  const regex = /\[FILE_ACTION:\s*(.+?)\]\s*\n\s*OPERATION:\s*(CREATE|MODIFY|DELETE|READ)\s*\n(?:\s*INTENT:\s*(MUTATE|NOOP)\s*\n)?(?:\s*CONTENT_HASH:\s*(\S+)\s*\n)?\s*DESCRIPTION:\s*(.+?)\s*\n(?:\s*CONTENT:\s*([\s\S]*?)\s*\n)?\s*\[\/FILE_ACTION\]/gi;
+  // Fixed ReDoS: Use [ \t]* for horizontal whitespace and [^\n]+ for line-bound fields.
+  const regex = /\[FILE_ACTION:[ \t]*([^\]\n]+)\][ \t]*\r?\n[ \t]*OPERATION:[ \t]*(CREATE|MODIFY|DELETE|READ)[ \t]*\r?\n(?:[ \t]*INTENT:[ \t]*(MUTATE|NOOP)[ \t]*\r?\n)?(?:[ \t]*CONTENT_HASH:[ \t]*(\S+)[ \t]*\r?\n)?[ \t]*DESCRIPTION:[ \t]*([^\n]+)[ \t]*\r?\n(?:[ \t]*CONTENT:[ \t]*([\s\S]*?)\r?\n)?[ \t]*\[\/FILE_ACTION\]/gi;
+
   let match;
   while ((match = regex.exec(output)) !== null) {
     actions.push({
