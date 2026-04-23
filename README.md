@@ -13,6 +13,9 @@
 ## Claude Opus 4.7 · Strict Write Discipline · Zero Slop
 **A local CLI power tool for verifiable AI-assisted coding.**
 
+
+[What is this?](#what-is-this) | [Features](#features) | [Installation](#installation) | [Usage](#usage) | [Architecture](#architecture) | [Token Budget](#token-usage--budget) | [SDK](#-sdk-usage-for-agentic-systems)
+
 ---
 
 ### Support the project
@@ -51,6 +54,7 @@ Zero slop. Zero hallucinated state. Full adaptive thinking.
 |  **Adaptive Thinking** | Opus 4.7 with configurable effort levels (high/medium/low) |
 |  **Strict Write Discipline** | Pre/post filesystem snapshots verify every model claim |
 |  **Self-Healing Memory** | Authority-based logging with a rebuildable SQLite FTS5 search index |
+|  **Auto-Healing TDD** | Pass `--test-cmd` for bounded, error-driven autonomous repair loops |
 |  **Correction Turns** | Model gets 2 retries to match filesystem reality, then yields |
 |  **Integrity Gate** | `verify` command and startup hashing ensure zero drift |
 |  **Token Limiter** | Budget cap with graceful save — progress saved to MEMORY.md, never lose work |
@@ -123,6 +127,7 @@ npm run chat
 
 ```bash
 mythos chat                  # Full power (high effort, Opus 4.7)
+mythos chat --test-cmd "npm test" # Enable autonomous test-driven self-healing
 mythos chat --effort low     # Budget mode (Haiku 3)
 mythos chat --effort medium  # Balanced (Sonnet 3.5)
 mythos chat --dry-run        # Preview all file changes before executing
