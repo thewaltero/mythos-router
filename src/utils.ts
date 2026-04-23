@@ -162,3 +162,58 @@ export function confirmPrompt(message: string): Promise<boolean> {
     });
   });
 }
+
+// ── Test Runner ──────────────────────────────────────────────
+import { spawn } from 'node:child_process';
+
+export interface TestResult {
+  passed: boolean;
+  output: string;
+}
+
+export function runTestCommand(cmd: string, timeoutMs = 15000): Promise<TestResult> {
+  return new Promise((resolve) => {
+    let finished = false;
+    
+    const safeResolve = (result: TestResult) => {
+      if (finished) return;
+      finished = true;
+      resolve(result);
+    };
+
+    const child = spawn(cmd, { shell: true, cwd: process.cwd() });
+    let output = '';
+    
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      safeResolve({ passed: false, output: `[TIMEOUT] Test exceeded ${timeoutMs}ms and was killed.` });
+    }, timeoutMs);
+
+    child.stdout.on('data', (data) => output += data.toString());
+    child.stderr.on('data', (data) => output += data.toString());
+
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      safeResolve({ passed: false, output: `Test runner crashed: ${err.message}` });
+    });
+
+    child.on('close', (code) => {
+      clearTimeout(timer);
+
+      if (!output.trim()) {
+        output = 'No output provided. The test command may not produce logs.';
+      }
+
+      const maxLen = 2000;
+      let finalOutput = output;
+      
+      if (output.length > maxLen) {
+        const head = output.slice(0, 500);
+        const tail = output.slice(-1500);
+        finalOutput = `${head}\n\n...[TRUNCATED]...\n\n${tail}`;
+      }
+
+      safeResolve({ passed: code === 0, output: finalOutput });
+    });
+  });
+}
