@@ -55,7 +55,7 @@
     "url": "https://github.com/thewaltero/mythos-router/issues"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.90.0",
+    "@anthropic-ai/sdk": "^0.81.0",
     "commander": "^14.0.3"
   },
   "devDependencies": {
