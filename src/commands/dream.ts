@@ -15,6 +15,7 @@ import { sendMessage } from '../client.js';
 import { c, heading, hr, Spinner, success, info, warn, dryRunBadge } from '../utils.js';
 import { saveSessionMetric } from '../metrics.js';
 import { COST_PER_INPUT_TOKEN, COST_PER_OUTPUT_TOKEN } from '../config.js';
+import { calculateCost } from '../providers/pricing.js';
 import * as path from 'node:path';
 
 // ── Dream Command ────────────────────────────────────────────
@@ -121,9 +122,17 @@ export async function dreamCommand(options: {
       `✅ ${ratio}% reduction`,
       dryRun,
     );
-    
     // Save metric
-    const costUSD = (response.inputTokens * COST_PER_INPUT_TOKEN) + (response.outputTokens * COST_PER_OUTPUT_TOKEN);
+    let costUSD = 0;
+    if (response._orchestration?.modelId) {
+      costUSD = calculateCost(
+        response._orchestration.modelId,
+        response.inputTokens,
+        response.outputTokens
+      );
+    } else {
+      costUSD = (response.inputTokens * COST_PER_INPUT_TOKEN) + (response.outputTokens * COST_PER_OUTPUT_TOKEN);
+    }
     saveSessionMetric({
       command: 'dream',
       project: path.basename(process.cwd()),
