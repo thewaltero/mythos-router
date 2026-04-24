@@ -211,6 +211,13 @@ export class ProviderOrchestrator {
 
       const scoreA = calculateScore(a.metrics, taskType);
       const scoreB = calculateScore(b.metrics, taskType);
+      
+      // Tie-breaker: if scores are virtually identical (e.g., at startup),
+      // respect the explicitly configured provider priority.
+      if (Math.abs(scoreA - scoreB) < 0.01) {
+        return a.config.priority - b.config.priority;
+      }
+
       return scoreB - scoreA;
     });
 
