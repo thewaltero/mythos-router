@@ -14,6 +14,8 @@ import { appendEntry, appendMetadataBlock, needsDream, getMemoryContext, printMe
 import { type EffortLevel, MAX_CORRECTION_RETRIES, MODELS, validateApiKey } from '../config.js';
 import { c, Spinner, BANNER, hr, heading, dryRunBadge, error as logError, warn as logWarn, success as logSuccess, runTestCommand } from '../utils.js';
 import { SessionBudget } from '../budget.js';
+import { getOrchestrator } from '../client.js';
+import { buildSkillPrompt, listSkills, ensureSkillsDir } from '../skills.js';
 import { isGitRepo, hasUncommittedChanges, getCurrentBranch, commitChanges, getLatestHash, createAndCheckoutBranch } from '../git.js';
 
 // ── UI Abstraction ──────────────────────────────────────────
@@ -35,18 +37,49 @@ class ChatSession {
   public budget: SessionBudget;
   public engine: SWDEngine;
   public options: ChatOptions;
+  public finalSystemPrompt: string = '';
+  public maxOutputTokens?: number;
+  public forceProvider?: string;
   private ui: ChatUI;
 
   constructor(options: ChatOptions, ui: ChatUI) {
     this.options = options;
     this.ui = ui;
+    // Parse budget config
+    const baseMaxTokens = parseInt(options.maxTokens ?? '500000', 10) || 500_000;
+    const maxTurns = parseInt(options.maxTurns ?? '25', 10) || 25;
+
+    // Load Skills
+    let budgetMultiplier = 1.0;
+    try {
+      const skills = typeof options.skill === 'string' ? [options.skill] : (options.skill || []);
+      const skillResult = buildSkillPrompt(getMemoryContext() ? '' : '', skills); // We inject context later
+      this.finalSystemPrompt = skillResult.prompt;
+      this.maxOutputTokens = skillResult.maxOutputTokens;
+      this.forceProvider = skillResult.forceProvider;
+      budgetMultiplier = skillResult.budgetMultiplier;
+
+      if (skillResult.skills.length > 0) {
+        this.ui.divider();
+        this.ui.log(`${c.cyan}${c.bold}⚡ ACTIVE SKILLS${c.reset}`);
+        for (const skill of skillResult.skills) {
+          this.ui.log(`  ${c.green}✔ ${skill.meta.name}${c.dim} (v${skill.meta.version}) - ${skill.meta.description}${c.reset}`);
+        }
+        this.ui.divider();
+      }
+    } catch (err: any) {
+      this.ui.error(`Skill Error: ${err.message}`);
+      process.exit(1);
+    }
+
     this.budget = new SessionBudget(
       {
-        maxTokens: parseInt(options.maxTokens ?? '500000', 10) || 500_000,
-        maxTurns: parseInt(options.maxTurns ?? '25', 10) || 25,
+        maxTokens: Math.floor(baseMaxTokens * budgetMultiplier),
+        maxTurns,
       },
       options.budget !== false,
     );
+    
     this.engine = new SWDEngine({ 
       strict: true, 
       enableRollback: true,
@@ -62,14 +95,13 @@ class ChatSession {
   public async initialize() {
     const context = await getMemoryContext();
     if (context) {
-      this.history.push({ 
-        role: 'user', 
-        content: `[CONTEXT: RECENT MEMORY]\n${context}` 
-      });
-      this.history.push({ 
-        role: 'assistant', 
-        content: "Acknowledged. I have restored context from memory." 
-      });
+      // Prepend context to the final system prompt (or inject as user message if skills modified it)
+      if (this.finalSystemPrompt) {
+        this.finalSystemPrompt = `[CONTEXT: RECENT MEMORY]\n${context}\n\n${this.finalSystemPrompt}`;
+      } else {
+        this.history.push({ role: 'user', content: `[CONTEXT: RECENT MEMORY]\n${context}` });
+        this.history.push({ role: 'assistant', content: "Acknowledged. I have restored context from memory." });
+      }
     }
   }
 
@@ -98,31 +130,48 @@ class ChatSession {
     let streamStarted = false;
 
     try {
-      const response = await streamMessage(
+      const orchestrator = getOrchestrator();
+      const response = await orchestrator.streamMessage(
         this.history,
-        this.options.effort as EffortLevel || 'high',
-        (delta) => {
-          thinkingTokens += Math.ceil(delta.length / 4);
-          this.ui.updateLoading(`Thinking... ${c.yellow}~${thinkingTokens} tokens${c.reset}`);
-        },
-        (delta) => {
-          if (!streamStarted) {
-            this.ui.stopLoading(`${c.green}✔${c.reset} ${c.dim}Reasoning complete${c.reset}\n`);
-            streamStarted = true;
-          }
-          this.ui.write(delta);
-        },
+        {
+          systemPrompt: this.finalSystemPrompt || '',
+          effort: this.options.effort as EffortLevel,
+          maxTokens: this.maxOutputTokens,
+          deterministic: !!this.forceProvider,
+          onThinkingDelta: (delta) => {
+            thinkingTokens += Math.ceil(delta.length / 4);
+            this.ui.updateLoading(`Thinking... ${c.yellow}~${thinkingTokens} tokens${c.reset}`);
+            if (process.stdout.isTTY) process.stdout.write(c.dim + delta + c.reset);
+          },
+          onTextDelta: (delta) => {
+            if (!streamStarted) {
+              this.ui.stopLoading(`${c.green}✔${c.reset} ${c.dim}Reasoning complete${c.reset}\n`);
+              streamStarted = true;
+            }
+            if (process.stdout.isTTY) process.stdout.write(delta);
+          },
+        }
       );
 
       this.ui.write('\n');
       this.history.push({ role: 'assistant', content: response.text });
-      this.budget.record(response.inputTokens, response.outputTokens);
+      this.budget.record(response.usage.inputTokens, response.usage.outputTokens);
 
       if (this.options.verbose) printVerboseParse(response.text);
 
       await this.handleSWD(response.text, input);
 
-      this.ui.log(`\n${formatTokenUsage(response)}`);
+      // formatTokenUsage takes MythosResponse, so we map it here
+      this.ui.log(`\n${formatTokenUsage({
+        thinking: response.thinking,
+        text: response.text,
+        inputTokens: response.usage.inputTokens,
+        outputTokens: response.usage.outputTokens,
+        _orchestration: {
+          ...response.metadata,
+          latencyMs: response.usage.latencyMs
+        },
+      })}`);
       this.ui.log(this.budget.formatBar());
       
       const warning = this.budget.formatWarning();
@@ -198,22 +247,28 @@ class ChatSession {
 
       let streamStarted = false;
       try {
-        const response = await streamMessage(
+        const orchestrator = getOrchestrator();
+        const response = await orchestrator.streamMessage(
           this.history,
-          this.options.effort as EffortLevel || 'high',
-          () => {}, // simple spinner
-          (delta) => {
-            if (!streamStarted) {
-              this.ui.stopLoading('\n');
-              streamStarted = true;
+          {
+            systemPrompt: this.finalSystemPrompt || '',
+            effort: this.options.effort as EffortLevel,
+            maxTokens: this.maxOutputTokens,
+            deterministic: !!this.forceProvider,
+            onThinkingDelta: () => {}, // simple spinner
+            onTextDelta: (delta) => {
+              if (!streamStarted) {
+                this.ui.stopLoading('\n');
+                streamStarted = true;
+              }
+              this.ui.write(delta);
             }
-            this.ui.write(delta);
           }
         );
 
         this.ui.write('\n');
         this.history.push({ role: 'assistant', content: response.text });
-        this.budget.record(response.inputTokens, response.outputTokens);
+        this.budget.record(response.usage.inputTokens, response.usage.outputTokens);
 
         this.ui.startLoading('Verifying corrected actions...');
         const result = await this.engine.run(parseActions(response.text));
@@ -298,22 +353,28 @@ class ChatSession {
       this.ui.startLoading(`Capybara is fixing tests...`);
 
       let streamStarted = false;
-      const response = await streamMessage(
+      const orchestrator = getOrchestrator();
+      const response = await orchestrator.streamMessage(
         this.history,
-        this.options.effort as EffortLevel || 'high',
-        () => {}, 
-        (delta) => {
-          if (!streamStarted) {
-            this.ui.stopLoading('\n');
-            streamStarted = true;
+        {
+          systemPrompt: this.finalSystemPrompt || '',
+          effort: this.options.effort as EffortLevel,
+          maxTokens: this.maxOutputTokens,
+          deterministic: !!this.forceProvider,
+          onThinkingDelta: () => {}, 
+          onTextDelta: (delta) => {
+            if (!streamStarted) {
+              this.ui.stopLoading('\n');
+              streamStarted = true;
+            }
+            this.ui.write(delta);
           }
-          this.ui.write(delta);
         }
       );
       
       this.ui.write('\n');
       this.history.push({ role: 'assistant', content: response.text });
-      this.budget.record(response.inputTokens, response.outputTokens);
+      this.budget.record(response.usage.inputTokens, response.usage.outputTokens);
 
       // 5. No-Op Guard
       const actions = parseActions(response.text);
@@ -397,6 +458,7 @@ interface ChatOptions {
   branch?: string;
   testCmd?: string;
   maxTestRetries?: string;
+  skill?: string | string[];
 }
 
 export async function chatCommand(options: ChatOptions): Promise<void> {
