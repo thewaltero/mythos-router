@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────────────────────
 //  mythos-router :: config.ts
-//  Constants, system prompt, and validation
+//  Constants, system prompt, validation, and provider config
 // ─────────────────────────────────────────────────────────────
 
 export const MODELS: Record<string, string> = {
@@ -133,4 +133,32 @@ export function validateApiKey(): string {
   }
 
   return key.trim();
+}
+
+// ── Multi-Provider API Key Helpers ───────────────────────────
+export function getOpenAIKey(): string | null {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key || typeof key !== 'string' || key.trim().length === 0) return null;
+  return key.trim();
+}
+
+export function getDeepSeekKey(): string | null {
+  const key = process.env.DEEPSEEK_API_KEY;
+  if (!key || typeof key !== 'string' || key.trim().length === 0) return null;
+  return key.trim();
+}
+
+/** Detect which provider API keys are configured */
+export interface AvailableProviders {
+  anthropic: string | null;
+  openai: string | null;
+  deepseek: string | null;
+}
+
+export function detectProviders(): AvailableProviders {
+  return {
+    anthropic: process.env.ANTHROPIC_API_KEY?.trim() || null,
+    openai: getOpenAIKey(),
+    deepseek: getDeepSeekKey(),
+  };
 }
