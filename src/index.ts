@@ -3,8 +3,26 @@
 //  Public API / SDK Exports
 // ─────────────────────────────────────────────────────────────
 
-// Export the Anthropic Adaptive Routing Client
-export { getClient, streamMessage, sendMessage, formatTokenUsage, type Message, type MythosResponse } from './client.js';
+// Export the Backward-Compatible Client Facade
+export { getClient, getOrchestrator, streamMessage, sendMessage, formatTokenUsage, type Message, type MythosResponse } from './client.js';
+
+// Export the Provider Orchestration Engine
+export { ProviderOrchestrator } from './providers/orchestrator.js';
+export { AnthropicProvider } from './providers/anthropic.js';
+export { calculateCost, getModelPricing, hasKnownPricing } from './providers/pricing.js';
+export {
+  type BaseProvider,
+  type UnifiedChunk,
+  type UnifiedResponse,
+  type UnifiedToolCall,
+  type RequestOptions,
+  type StreamOptions,
+  type SendOptions,
+  type ProviderConfig,
+  type ProviderCapability,
+  type ProviderStatus,
+  type OrchestrationEvent,
+} from './providers/types.js';
 
 // Export the Strict Write Discipline Engine (v1 API — Pure Kernel)
 export {
@@ -27,6 +45,9 @@ export { printSWDResults, dryRunSWD, printVerboseParse } from './swd-cli.js';
 
 // Export the Self-Healing Memory
 export { readMemory, writeCompressedMemory, initMemory, appendEntry, needsDream, getMemoryContext, type MemoryEntry } from './memory.js';
+
+// Export the Deterministic Cache
+export { ResponseCache, generateCacheKey, type CacheKeyInput } from './cache.js';
 
 // Export the Budget Limiter
 export { SessionBudget, type BudgetConfig, type BudgetCheck, type BudgetSnapshot } from './budget.js';
