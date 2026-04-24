@@ -10,8 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.2.1] — 2026-04-24
 
 ### Added
-- **Auto Healing TDD Loop**: Bounded, error-driven autonomy. Passing `--test-cmd` will automatically execute tests after a successful SWD mutation. If tests fail, the CLI intercepts `stderr`, truncates it, identifies TS/Runtime issues, and feeds it back to Claude for a self-healing iteration.
-- **TDD Anti Thrashing Guards**: The orchestrator will automatically abort the healing loop if Claude attempts the exact same fix or if output remains identically broken, preventing runaway API costs.
+- **Multi Provider Orchestration Engine**: Decoupled the core application from the Anthropic SDK. The system now supports fallback routing, adaptive watchdogs, circuit breakers, and EMA-based performance scoring across multiple providers.
+- **OpenAI & DeepSeek Support**: Added a native, zero-dependency `fetch`-based provider (`OpenAIProvider`) to seamlessly support OpenAI and DeepSeek endpoints (including streaming reasoning content for `o1` and `DeepSeek-R1`).
+- **Skills Protocol**: Modular expert plugins via zero-dependency YAML frontmatter parsing. Skills (`-s <skill>`) can inject customized instructions, modify budget multipliers, and enforce deterministic provider selection.
+- **Deterministic Response Caching**: SQLite-backed response caching for pure reasoning requests (like `verify` or `dream`). Bypass rule strictly ensures file mutating responses are never cached.
+- **Centralized Pricing Registry**: Unified token cost calculator across different providers, feeding exact financial data into the budget metrics.
+- **Auto-Healing TDD Loop**: Bounded, error-driven autonomy. Passing `--test-cmd` will automatically execute tests after a successful SWD mutation. If tests fail, the CLI intercepts `stderr`, truncates it, identifies TS/Runtime issues, and feeds it back to Claude for a self healing iteration.
+- **TDD Anti-Thrashing Guards**: The orchestrator will automatically abort the healing loop if Claude attempts the exact same fix or if output remains identically broken, preventing runaway API costs.
   
 ### Security
 - **CodeQL Integration**: Added GitHub CodeQL scanning
