@@ -61,7 +61,7 @@
     "commander": "^14.0.3"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
+    "@types/node": "^25.6.0",
     "tsx": "^4.19.0",
     "typescript": "^6.0.3"
   },
