@@ -1,13 +1,3 @@
-// ─────────────────────────────────────────────────────────────
-//  mythos-router :: providers/openai.ts
-//  OpenAI-compatible provider — works with OpenAI, DeepSeek,
-//  Grok, and any OpenAI-compatible endpoint.
-//
-//  Zero dependencies: uses native fetch() (Node 20+).
-//  Handles SSE streaming, reasoning_content (DeepSeek/o1),
-//  and standard content deltas.
-// ─────────────────────────────────────────────────────────────
-
 import {
   type BaseProvider,
   type Message,
@@ -60,6 +50,62 @@ export class OpenAIProvider implements BaseProvider {
     this.capabilities = new Set(caps);
   }
 
+  private async processSSEStream(
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+    options: StreamOptions
+  ) {
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let thinkingText = '';
+    let responseText = '';
+    let inputTokens = 0;
+    let outputTokens = 0;
+
+    try {
+      while (true) {
+        if (options.signal?.aborted) break;
+
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const parsed = parseSSELine(line);
+          if (!parsed) continue;
+
+          const choices = parsed.choices as Array<{
+            delta?: { content?: string; reasoning_content?: string; };
+          }> | undefined;
+
+          if (choices?.[0]?.delta) {
+            const delta = choices[0].delta;
+            if (delta.reasoning_content) {
+              thinkingText += delta.reasoning_content;
+              options.onThinkingDelta?.(delta.reasoning_content);
+            }
+            if (delta.content) {
+              responseText += delta.content;
+              options.onTextDelta?.(delta.content);
+            }
+          }
+
+          const usage = parsed.usage as { prompt_tokens?: number; completion_tokens?: number; } | undefined;
+          if (usage) {
+            inputTokens = usage.prompt_tokens ?? inputTokens;
+            outputTokens = usage.completion_tokens ?? outputTokens;
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    return { thinkingText, responseText, inputTokens, outputTokens };
+  }
+
   // ── Streaming Message ────────────────────────────────────
   async streamMessage(
     messages: Message[],
@@ -99,71 +145,11 @@ export class OpenAIProvider implements BaseProvider {
       throw new Error(`[${this.id}] No response body received`);
     }
 
-    let thinkingText = '';
-    let responseText = '';
-    let inputTokens = 0;
-    let outputTokens = 0;
+    const { thinkingText, responseText, inputTokens: parsedInputTokens, outputTokens: parsedOutputTokens } = 
+      await this.processSSEStream(response.body.getReader(), options);
 
-    // Parse SSE stream
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    try {
-      while (true) {
-        if (options.signal?.aborted) break;
-
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-        for (const line of lines) {
-          const parsed = parseSSELine(line);
-          if (!parsed) continue;
-
-          // Extract delta content
-          const choices = parsed.choices as Array<{
-            delta?: {
-              content?: string;
-              reasoning_content?: string;
-            };
-            finish_reason?: string;
-          }> | undefined;
-
-          if (choices?.[0]?.delta) {
-            const delta = choices[0].delta;
-
-            // Reasoning/thinking content (DeepSeek reasoner, o1/o3)
-            if (delta.reasoning_content) {
-              thinkingText += delta.reasoning_content;
-              options.onThinkingDelta?.(delta.reasoning_content);
-            }
-
-            // Standard content
-            if (delta.content) {
-              responseText += delta.content;
-              options.onTextDelta?.(delta.content);
-            }
-          }
-
-          // Extract usage from final chunk (if provided)
-          const usage = parsed.usage as {
-            prompt_tokens?: number;
-            completion_tokens?: number;
-          } | undefined;
-
-          if (usage) {
-            inputTokens = usage.prompt_tokens ?? inputTokens;
-            outputTokens = usage.completion_tokens ?? outputTokens;
-          }
-        }
-      }
-    } finally {
-      reader.releaseLock();
-    }
+    let inputTokens = parsedInputTokens;
+    let outputTokens = parsedOutputTokens;
 
     // Estimate tokens if not provided by the API
     if (inputTokens === 0) {
