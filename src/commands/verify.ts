@@ -1,8 +1,3 @@
-// ─────────────────────────────────────────────────────────────
-//  mythos-router :: commands/verify.ts
-//  Codebase ↔ MEMORY.md drift scanner
-// ─────────────────────────────────────────────────────────────
-
 import { readdirSync, statSync, readFileSync, existsSync } from 'node:fs';
 import { resolve, relative, join } from 'node:path';
 import { readMemory, initMemory, appendEntry, getMemoryPath } from '../memory.js';
@@ -33,89 +28,11 @@ export async function verifyCommand(options: { dryRun?: boolean } = {}): Promise
   console.log(`${c.dim}  Memory has ${c.cyan}${entries.length}${c.dim} entries${c.reset}`);
   console.log();
 
-  // Extract file paths mentioned in memory
-  const mentionedPaths = new Set<string>();
-  for (const entry of entries) {
-    // Parse paths from action column
-    const pathMatches = entry.action.match(
-      /(?:CREATE|MODIFY|DELETE|READ|chat):\s*(.+?)(?:;|$)/gi,
-    );
-    if (pathMatches) {
-      for (const match of pathMatches) {
-        const path = match.replace(/^(?:CREATE|MODIFY|DELETE|READ|chat):\s*/i, '').trim();
-        if (path && !path.startsWith('chat:')) {
-          mentionedPaths.add(path);
-        }
-      }
-    }
-  }
+  const mentionedPaths = extractMentionedPaths(entries);
+  const { verified, drifted, missing } = verifyMentionedPaths(mentionedPaths, cwd, entries);
+  const untrackedFiles = getUntrackedFiles(files, mentionedPaths, cwd);
 
-  // ── Verify each mentioned path ─────────────────────────
-  let verified = 0;
-  let drifted = 0;
-  let missing = 0;
-
-  if (mentionedPaths.size > 0) {
-    console.log(`${c.bold}File References in Memory:${c.reset}\n`);
-
-    for (const rawPath of mentionedPaths) {
-      const absPath = resolve(cwd, rawPath);
-      const relPath = relative(cwd, absPath);
-
-      if (existsSync(absPath)) {
-        const stat = statSync(absPath);
-
-        // Check if the most recent memory entry for this file reflects current state
-        const lastEntry = entries
-          .filter((e) => e.action.includes(rawPath))
-          .pop();
-
-        if (lastEntry?.result.includes('✅')) {
-          success(`${relPath} — verified (${formatSize(stat.size)})`);
-          verified++;
-        } else {
-          warn(`${relPath} — exists but memory shows: ${lastEntry?.result ?? 'no result'}`);
-          drifted++;
-        }
-      } else {
-        // Check if it was supposed to be deleted
-        const lastEntry = entries
-          .filter((e) => e.action.includes(rawPath))
-          .pop();
-
-        if (lastEntry?.action.includes('DELETE')) {
-          success(`${relPath} — correctly deleted`);
-          verified++;
-        } else {
-          error(`${relPath} — missing from filesystem`);
-          missing++;
-        }
-      }
-    }
-  } else {
-    info('No file operations found in memory.');
-  }
-
-  // ── Untracked files ────────────────────────────────────
-  const untrackedFiles = files.filter((f) => {
-    const rel = relative(cwd, f);
-    return !mentionedPaths.has(rel) && !mentionedPaths.has(f);
-  });
-
-  if (untrackedFiles.length > 0) {
-    console.log(`\n${c.bold}Untracked Files (not in memory):${c.reset}\n`);
-    const showMax = 20;
-    for (const f of untrackedFiles.slice(0, showMax)) {
-      const rel = relative(cwd, f);
-      const stat = statSync(f);
-      console.log(`  ${c.dim}·${c.reset} ${rel} ${c.dim}(${formatSize(stat.size)})${c.reset}`);
-    }
-    if (untrackedFiles.length > showMax) {
-      console.log(
-        `  ${c.dim}... and ${untrackedFiles.length - showMax} more${c.reset}`,
-      );
-    }
-  }
+  printUntrackedFiles(untrackedFiles, cwd);
 
   // ── Summary ────────────────────────────────────────────
   console.log(`\n${hr()}`);
@@ -140,6 +57,85 @@ export async function verifyCommand(options: { dryRun?: boolean } = {}): Promise
     );
   } else {
     console.log(`\n${c.green}✔ Zero drift. Memory and codebase are in sync.${c.reset}`);
+  }
+}
+
+// ── Refactored Verification Helpers ──────────────────────────
+
+type MemoryEntry = { action: string; result: string };
+
+function extractMentionedPaths(entries: MemoryEntry[]): Set<string> {
+  const mentionedPaths = new Set<string>();
+  for (const entry of entries) {
+    const pathMatches = entry.action.match(/(?:CREATE|MODIFY|DELETE|READ|chat):\s*(.+?)(?:;|$)/gi);
+    if (pathMatches) {
+      for (const match of pathMatches) {
+        const path = match.replace(/^(?:CREATE|MODIFY|DELETE|READ|chat):\s*/i, '').trim();
+        if (path && !path.startsWith('chat:')) {
+          mentionedPaths.add(path);
+        }
+      }
+    }
+  }
+  return mentionedPaths;
+}
+
+function verifyMentionedPaths(mentionedPaths: Set<string>, cwd: string, entries: MemoryEntry[]) {
+  let verified = 0;
+  let drifted = 0;
+  let missing = 0;
+
+  if (mentionedPaths.size > 0) {
+    console.log(`${c.bold}File References in Memory:${c.reset}\n`);
+    for (const rawPath of mentionedPaths) {
+      const absPath = resolve(cwd, rawPath);
+      const relPath = relative(cwd, absPath);
+      const lastEntry = entries.filter((e) => e.action.includes(rawPath)).pop();
+
+      if (existsSync(absPath)) {
+        const stat = statSync(absPath);
+        if (lastEntry?.result.includes('✅')) {
+          success(`${relPath} — verified (${formatSize(stat.size)})`);
+          verified++;
+        } else {
+          warn(`${relPath} — exists but memory shows: ${lastEntry?.result ?? 'no result'}`);
+          drifted++;
+        }
+      } else {
+        if (lastEntry?.action.includes('DELETE')) {
+          success(`${relPath} — correctly deleted`);
+          verified++;
+        } else {
+          error(`${relPath} — missing from filesystem`);
+          missing++;
+        }
+      }
+    }
+  } else {
+    info('No file operations found in memory.');
+  }
+  return { verified, drifted, missing };
+}
+
+function getUntrackedFiles(files: string[], mentionedPaths: Set<string>, cwd: string): string[] {
+  return files.filter((f) => {
+    const rel = relative(cwd, f);
+    return !mentionedPaths.has(rel) && !mentionedPaths.has(f);
+  });
+}
+
+function printUntrackedFiles(untrackedFiles: string[], cwd: string): void {
+  if (untrackedFiles.length > 0) {
+    console.log(`\n${c.bold}Untracked Files (not in memory):${c.reset}\n`);
+    const showMax = 20;
+    for (const f of untrackedFiles.slice(0, showMax)) {
+      const rel = relative(cwd, f);
+      const stat = statSync(f);
+      console.log(`  ${c.dim}·${c.reset} ${rel} ${c.dim}(${formatSize(stat.size)})${c.reset}`);
+    }
+    if (untrackedFiles.length > showMax) {
+      console.log(`  ${c.dim}... and ${untrackedFiles.length - showMax} more${c.reset}`);
+    }
   }
 }
 
