@@ -1,3 +1,12 @@
+// ─────────────────────────────────────────────────────────────
+//  mythos-router :: providers/orchestrator.ts
+//  The Mythos Orchestration Engine
+//
+//  Adaptive routing, retry-before-fallback, circuit breakers,
+//  stream watchdogs, and per-provider concurrency control.
+//  Zero external dependencies.
+// ─────────────────────────────────────────────────────────────
+
 import { createHash } from 'node:crypto';
 import { TelemetryStore } from './telemetry.js';
 import {
@@ -452,7 +461,7 @@ export class ProviderOrchestrator {
         this.telemetry.logFailure({
           timestamp: Date.now(),
           provider: slot.provider.id,
-          errorType: reason,
+          errorType: reason ?? 'server_error',
           shortMessage: error.message.slice(0, 100),
           fullStack: error.stack || error.message
         });
