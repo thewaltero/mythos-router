@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.0] — 2026-04-26
+
+### Added
+- **Provider Observability Dashboard**: Added the `mythos providers` command. A real-time, terminal-based dashboard that surfaces EMA latency trends, success rates, circuit breaker recovery ETAs, and a live "Leader" score. Includes a zero-flicker `--watch` mode.
+- **SQLite Telemetry Backend**: Orchestration events are now persistently streamed to a dedicated `telemetry.db` using WAL pragmas and an asynchronous batching queue to guarantee zero hot-path blocking.
+- **Contextual Decision Tracing**: The engine no longer just routes; it explains *why*. Routing traces now explicitly capture task type (`chat`, `code`, `analysis`), input token buckets, and latency-vs-success-rate reasoning logs.
+- **Automated Retention Policies**: The telemetry engine aggressively self-prunes history, maintaining only the last 1,000 routing events and truncating error stack traces to prevent long-term database bloat.
+
+---
+
 ## [1.2.1] — 2026-04-24
 
 ### Added
@@ -150,6 +160,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Correction Turns**: max 2 retries before yielding to human.
 - **Dream/Verify Commands**: memory compression and drift detection.
 
+[1.3.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.3.0
 [1.2.1]: https://github.com/thewaltero/mythos-router/releases/tag/v1.2.1
 [1.2.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.2.0
 [1.1.9]: https://github.com/thewaltero/mythos-router/releases/tag/v1.1.9
