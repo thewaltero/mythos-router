@@ -1,3 +1,11 @@
+// ─────────────────────────────────────────────────────────────
+//  mythos-router :: providers/telemetry.ts
+//  Observable Telemetry Backend — SQLite-powered event streaming
+//
+//  Separates state (metrics) from history (decisions, failures).
+//  Uses an asynchronous batching queue to prevent I/O blocking.
+// ─────────────────────────────────────────────────────────────
+
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -159,7 +167,7 @@ export class TelemetryStore {
       // If there were decisions/failures but NO metric updates, we MUST update the global updated_at 
       // so the UI watch mode detects the change.
       if (this.metricUpdates.size === 0 && (this.decisionQueue.length > 0 || this.failureQueue.length > 0)) {
-        this.db.exec(\`UPDATE provider_metrics SET updated_at = \${now}\`);
+        this.db.exec(`UPDATE provider_metrics SET updated_at = ${now}`);
       }
 
       // Append Decisions (Events)
