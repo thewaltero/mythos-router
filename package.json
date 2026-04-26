@@ -1,6 +1,6 @@
 {
   "name": "mythos-router",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "description": "Capybara-tier CLI router — Claude Opus 4.7 with Adaptive Thinking, Strict Write Discipline, and Self-Healing Memory",
   "type": "module",
   "bin": {
@@ -57,13 +57,13 @@
     "url": "https://github.com/thewaltero/mythos-router/issues"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.91.1",
+    "@anthropic-ai/sdk": "^0.90.0",
     "commander": "^14.0.3"
   },
   "devDependencies": {
-    "@types/node": "^25.6.0",
+    "@types/node": "^22.0.0",
     "tsx": "^4.19.0",
-    "typescript": "^6.0.3"
+    "typescript": "^5.7.0"
   },
   "engines": {
     "node": ">=20.0.0"
