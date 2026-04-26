@@ -9,6 +9,7 @@ import { chatCommand } from './commands/chat.js';
 import { verifyCommand } from './commands/verify.js';
 import { dreamCommand } from './commands/dream.js';
 import { statsCommand } from './commands/stats.js';
+import { providersCommand } from './commands/providers.js';
 import {
   DEFAULT_MAX_TOKENS_PER_SESSION,
   DEFAULT_MAX_TURNS,
@@ -22,7 +23,7 @@ program
     'Capybara-tier CLI router — Claude Opus 4.7 with Adaptive Thinking, ' +
     'Strict Write Discipline, and Self-Healing Memory.',
   )
-  .version('1.2.2');
+  .version('1.2.1');
 
 // ── mythos chat ──────────────────────────────────────────────
 program
@@ -108,6 +109,16 @@ program
   .option('-d, --days <n>', 'Filter metrics by the last N days')
   .action(async (options) => {
     await statsCommand(options);
+  });
+
+// ── mythos providers ─────────────────────────────────────────
+program
+  .command('providers')
+  .description('Live dashboard of provider health, EMA scoring, and routing decisions')
+  .option('-w, --watch', 'Auto-refresh the dashboard when metrics change')
+  .option('--verbose', 'Show full error stacks for recent failures')
+  .action(async (options) => {
+    await providersCommand(options);
   });
 
 // ── Default: show help ───────────────────────────────────────
