@@ -1,9 +1,3 @@
-// ─────────────────────────────────────────────────────────────
-//  mythos-router :: commands/chat.ts
-//  Interactive REPL with Capybara thinking protocol
-//  + Budget Limiter + Dry-Run + Verbose modes
-// ─────────────────────────────────────────────────────────────
-
 import * as readline from 'node:readline';
 import * as path from 'node:path';
 import { streamMessage, formatTokenUsage, type Message, type MythosResponse } from '../client.js';
@@ -79,9 +73,9 @@ class ChatSession {
       },
       options.budget !== false,
     );
-    
-    this.engine = new SWDEngine({ 
-      strict: true, 
+
+    this.engine = new SWDEngine({
+      strict: true,
       enableRollback: true,
       onAction: (a) => this.ui.updateLoading(`Executing: ${c.cyan}${a.operation}${c.reset} ${a.path}...`),
       onVerify: (r) => this.ui.updateLoading(`Verifying: ${r.action.path}...`),
@@ -107,7 +101,7 @@ class ChatSession {
 
   public async setupSandbox(): Promise<string | null> {
     if (!this.options.branch) return null;
-    
+
     if (!isGitRepo()) throw new Error('Not a git repository. Cannot use --branch flag.');
     if (hasUncommittedChanges()) throw new Error('Uncommitted changes detected. Please commit or stash before sandboxing.');
 
@@ -116,13 +110,79 @@ class ChatSession {
 
     const timestampStr = new Date().toISOString().replace(/[-T:]/g, '').slice(0, 12);
     const branchName = `mythos/${this.options.branch}-${timestampStr}`;
-    
+
     logSuccess(`Creating sandbox branch: ${c.bold}${branchName}${c.reset}`);
     createAndCheckoutBranch(branchName);
     return branchName;
   }
 
+  private async enforceContextWindowGuard(): Promise<void> {
+    let historyLength = 0;
+    for (const msg of this.history) {
+      historyLength += msg.content.length;
+    }
+    
+    // 1. Token estimation with 1.2x safety multiplier
+    const historyTokens = Math.ceil((historyLength / 4) * 1.2);
+    const systemPromptTokens = Math.ceil(((this.finalSystemPrompt?.length ?? 0) / 4) * 1.2);
+    
+    // 3. System prompt inclusion safety buffer
+    const RESPONSE_BUFFER = 8192;
+    const effectiveLimit = 150_000 - systemPromptTokens - RESPONSE_BUFFER;
+
+    // 2. Compression ceiling rule
+    const MAX_MESSAGES = 120;
+    const overTokenLimit = historyTokens > effectiveLimit;
+    const overMessageLimit = this.history.length > MAX_MESSAGES;
+
+    if (!overTokenLimit && !overMessageLimit) return;
+
+    // At least 60%, or more if needed to get under the message cap
+    const messagesToCompress = Math.max(
+      Math.floor(this.history.length * 0.6),
+      this.history.length - (MAX_MESSAGES - 1)
+    );
+    
+    if (messagesToCompress < 2) return;
+
+    const toCompress = this.history.slice(0, messagesToCompress);
+    const toKeep = this.history.slice(messagesToCompress);
+
+    const reason = overMessageLimit ? `message cap (> ${MAX_MESSAGES})` : '150k token limit';
+    this.ui.warn(`\n${c.yellow}Context approaching ${reason}. Compressing oldest ${messagesToCompress} turns...${c.reset}`);
+
+    const prompt = `Please summarize the following older conversation context into a dense, factual summary. Preserve all technical decisions, constraints, paths, and context needed to continue the work.\n\n<history>\n${JSON.stringify(toCompress, null, 2)}\n</history>`;
+
+    try {
+      const orchestrator = getOrchestrator();
+      const response = await orchestrator.sendMessage(
+        [{ role: 'user', content: prompt }],
+        {
+          systemPrompt: 'You are a core memory compression system. Be extremely dense and factual.',
+          effort: 'low',
+          maxTokens: 4096,
+          deterministic: !!this.forceProvider
+        }
+      );
+
+      this.budget.record(response.usage.inputTokens, response.usage.outputTokens);
+
+      this.history = [
+        { role: 'assistant', content: `[CONTEXT SUMMARY OF PREVIOUS TURNS]\n${response.text}` },
+        ...toKeep
+      ];
+      
+      appendEntry('Context Compression', `Summarized ${messagesToCompress} turns to prevent context overflow.`, this.options.dryRun);
+    } catch (err: any) {
+      this.ui.warn(`\n${c.red}Summarization failed (${err.message}). Falling back to hard truncation.${c.reset}`);
+      this.history = toKeep;
+      appendEntry('Context Compression', `Hard truncation of ${messagesToCompress} turns due to summary failure.`, this.options.dryRun);
+    }
+  }
+
   public async processInput(input: string): Promise<void> {
+    await this.enforceContextWindowGuard();
+
     this.history.push({ role: 'user', content: input });
     this.ui.startLoading('Capybara is thinking...');
 
@@ -173,7 +233,7 @@ class ChatSession {
         },
       })}`);
       this.ui.log(this.budget.formatBar());
-      
+
       const warning = this.budget.formatWarning();
       if (warning) this.ui.warn(`\n${warning}`);
 
@@ -197,7 +257,7 @@ class ChatSession {
     if (this.options.dryRun) {
       const dryResult = await dryRunSWD(actions);
       appendEntry(
-        summarizeActions(responseText, userInput), 
+        summarizeActions(responseText, userInput),
         `🛠️ dry-run: ${dryResult.accepted.length} accepted, ${dryResult.rejected.length} rejected`,
         true
       );
@@ -234,14 +294,14 @@ class ChatSession {
       }
 
       this.ui.log(`\n${c.yellow}⟲ SWD Correction Turn ${attempt}/${MAX_CORRECTION_RETRIES}${c.reset}`);
-      
+
       const failures = lastResult.results
         .filter(r => ['failed', 'drift'].includes(r.status))
         .map(r => `- [${r.status.toUpperCase()}] ${r.action.operation} ${r.action.path}: ${r.detail}`)
         .join('\n');
 
       const prompt = `[SWD CORRECTION TURN]\nFile actions failed verification:\n${failures}\n\nPlease correct your response. Attempts remaining: ${MAX_CORRECTION_RETRIES - (attempt - 1)}`;
-      
+
       this.history.push({ role: 'user', content: prompt });
       this.ui.startLoading(`Correction attempt ${attempt}...`);
 
@@ -255,7 +315,7 @@ class ChatSession {
             effort: this.options.effort as EffortLevel,
             maxTokens: this.maxOutputTokens,
             deterministic: !!this.forceProvider,
-            onThinkingDelta: () => {}, // simple spinner
+            onThinkingDelta: () => { }, // simple spinner
             onTextDelta: (delta) => {
               if (!streamStarted) {
                 this.ui.stopLoading('\n');
@@ -297,12 +357,12 @@ class ChatSession {
     const maxRetries = parseInt(this.options.maxTestRetries || '3', 10);
     let lastOutput = '';
     let lastFailureCount = Infinity;
-    
+
     // Targeted normalization for identical output detection
-    const normalizeOutput = (str: string) => 
+    const normalizeOutput = (str: string) =>
       str.replace(/\d+\.?\d*ms/g, '')
-         .replace(/\d+\.?\d*s/g, '')
-         .trim();
+        .replace(/\d+\.?\d*s/g, '')
+        .trim();
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       if (!this.budget.check().ok) {
@@ -312,7 +372,7 @@ class ChatSession {
 
       this.ui.startLoading(`Running tests: ${c.cyan}${cmd}${c.reset}...`);
       const { passed, output } = await runTestCommand(cmd);
-      
+
       if (passed) {
         this.ui.stopLoading();
         this.ui.success(`Tests passed!`);
@@ -321,18 +381,18 @@ class ChatSession {
 
       this.ui.stopLoading();
       this.ui.error(`Tests failed (Attempt ${attempt}/${maxRetries})`);
-      
+
       // 1. Precise Thrashing Guard
       if (attempt > 1 && normalizeOutput(output) === normalizeOutput(lastOutput)) {
-         this.ui.warn('Test output is effectively unchanged from previous attempt. Stopping loop to prevent token drain.');
-         return;
+        this.ui.warn('Test output is effectively unchanged from previous attempt. Stopping loop to prevent token drain.');
+        return;
       }
       lastOutput = output;
 
       // 2. Regression Detection
       const currentFailureCount = (output.match(/fail|error/gi) || []).length;
       if (attempt > 1 && currentFailureCount > lastFailureCount) {
-         this.ui.warn(`Regression detected: Failure count increased (${lastFailureCount} → ${currentFailureCount}). Be cautious.`);
+        this.ui.warn(`Regression detected: Failure count increased (${lastFailureCount} → ${currentFailureCount}). Be cautious.`);
       }
       lastFailureCount = currentFailureCount;
 
@@ -348,7 +408,7 @@ class ChatSession {
 
       // 4. Structured Prompting
       const prompt = `[TEST FAILURE]\n\nCommand:\n${cmd}\n\nSummary:\nThe test suite failed. Analyze the error output below and fix the code.\n${hint ? `Hint: ${hint}\n` : ''}\nError Output:\n\`\`\`text\n${output}\n\`\`\`\n\nInstructions:\n- Fix only what is necessary to make the test pass.\n- Do not rewrite unrelated files.\n- Keep fixes minimal and targeted.`;
-      
+
       this.history.push({ role: 'user', content: prompt });
       this.ui.startLoading(`Capybara is fixing tests...`);
 
@@ -361,7 +421,7 @@ class ChatSession {
           effort: this.options.effort as EffortLevel,
           maxTokens: this.maxOutputTokens,
           deterministic: !!this.forceProvider,
-          onThinkingDelta: () => {}, 
+          onThinkingDelta: () => { },
           onTextDelta: (delta) => {
             if (!streamStarted) {
               this.ui.stopLoading('\n');
@@ -371,7 +431,7 @@ class ChatSession {
           }
         }
       );
-      
+
       this.ui.write('\n');
       this.history.push({ role: 'assistant', content: response.text });
       this.budget.record(response.usage.inputTokens, response.usage.outputTokens);
@@ -388,13 +448,13 @@ class ChatSession {
       const fixResult = await this.engine.run(actions);
       this.ui.stopLoading();
       printSWDResults(fixResult);
-      
+
       if (!fixResult.success) {
-         this.ui.error('SWD failed while attempting to fix tests. Yielding.');
-         break;
+        this.ui.error('SWD failed while attempting to fix tests. Yielding.');
+        break;
       }
     }
-    
+
     this.ui.error(`Max test retries (${maxRetries}) reached. Yielding to human.`);
     this.ui.log(`\n${c.dim}--- Final Test Output ---${c.reset}\n${lastOutput}`);
   }
