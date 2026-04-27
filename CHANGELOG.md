@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.1] — 2026-04-27
+
+### Added
+- **Developer Experience**: Added a `BACKLOG.md` to cleanly track and categorize deferred architectural decisions and future system robustness plans.
+
+### Fixed
+- **CLI Robustness**: The terminal cursor is now safely restored if the CLI process crashes mid-animation, preventing the "invisible cursor" terminal bug.
+- **Provider Concurrency**: Fixed a decrement scoping bug in the `ProviderOrchestrator` ensuring `maxConcurrency` limits are strictly enforced even under parallel SDK usage.
+- **SQLite Compatibility**: Centralized `node:sqlite` loading into a single robust loader module, allowing the tool to fail gracefully instead of crashing on unsupported Node environments.
+
+---
+
 ## [1.3.0] — 2026-04-26
 
 ### Added
@@ -160,6 +172,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Correction Turns**: max 2 retries before yielding to human.
 - **Dream/Verify Commands**: memory compression and drift detection.
 
+[1.3.1]: https://github.com/thewaltero/mythos-router/releases/tag/v1.3.1
 [1.3.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.3.0
 [1.2.1]: https://github.com/thewaltero/mythos-router/releases/tag/v1.2.1
 [1.2.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.2.0
