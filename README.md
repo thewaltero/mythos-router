@@ -13,6 +13,8 @@
 ## Claude Opus 4.7 · Strict Write Discipline · Zero Slop
 **A local CLI power tool for verifiable AI-assisted coding.**
 
+<br />
+
 [What is this?](#what-is-this) • [Features](#features) • [Installation](#installation) • [Usage](#usage) • [Architecture](#architecture) • [Token Budget](#token-usage--budget) • [SDK](#-sdk-usage-for-agentic-systems)
 
 
@@ -53,10 +55,10 @@ Zero slop. Zero hallucinated state. Full adaptive thinking.
 |---------|-------------|
 |  **Multi-Provider Fallback** | Auto-routes between Anthropic, DeepSeek, and OpenAI with circuit breakers |
 |  **Skills Protocol** | Inject modular expert plugins via YAML frontmatter (`-s mcp`, `-s react`) |
-|  **Deterministic Caching** | SQLite-backed caching for zero-cost, zero-latency repetitive reasoning |
+|  **Deterministic Caching** | SQLite-backed caching for zero-cost, zero-latency repetitive reasoning *(Node 22+)* |
 |  **Adaptive Thinking** | Opus 4.7 with configurable effort levels (high/medium/low) |
 |  **Strict Write Discipline** | Pre/post filesystem snapshots verify every model claim |
-|  **Self-Healing Memory** | Authority-based logging with a rebuildable SQLite FTS5 search index |
+|  **Self-Healing Memory** | Authority-based logging with a rebuildable SQLite FTS5 search index *(Node 22+)* |
 |  **Auto-Healing TDD** | Pass `--test-cmd` for bounded, error-driven autonomous repair loops |
 |  **Correction Turns** | Model gets 2 retries to match filesystem reality, then yields |
 |  **Integrity Gate** | `verify` command and startup hashing ensure zero drift |
@@ -92,6 +94,8 @@ As memory approaches capacity, the `dream` command delegates a compression phase
 ---
 
 ## Installation
+
+> **Node.js Version Requirement:** The core CLI runs perfectly on **Node 20+**. However, the advanced SQLite-backed features (Telemetry Dashboard, Deterministic Caching, and High-Performance Memory Index) require **Node.js 22.12.0+**. If you run the tool on an older version, these features will safely and silently degrade to a no-op without crashing the router.
 
 ### Quick Start (npm)
 
