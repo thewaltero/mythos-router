@@ -17,6 +17,7 @@ import {
   DEFAULT_MAX_TOKENS_PER_SESSION,
   DEFAULT_MAX_TURNS,
 } from './config.js';
+import { BANNER } from './utils.js';
 
 // ── Read version from package.json (single source of truth) ──
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -25,7 +26,14 @@ const pkg = JSON.parse(readFileSync(resolve(__dirname, '..', 'package.json'), 'u
 const program = new Command();
 
 // ── Restore cursor on any exit (spinner crash safety) ────────
-process.on('exit', () => process.stdout.write('\x1b[?25h'));
+const restoreCursor = () => process.stdout.write('\x1b[?25h');
+process.on('exit', restoreCursor);
+process.on('SIGINT', () => { restoreCursor(); process.exit(0); });
+process.on('uncaughtException', (err) => {
+  restoreCursor();
+  console.error(err);
+  process.exit(1);
+});
 
 program
   .name('mythos')
@@ -83,9 +91,11 @@ program
     '-s, --skill <names...>',
     'Inject specific expert skills (e.g., -s mcp -s react)',
   )
-  .action(async (options) => {
-    await chatCommand(options);
-  });
+  .option(
+    '--resume',
+    'Resume the last saved session (history + budget state)',
+  )
+  .action(chatCommand);
 
 // ── mythos verify ────────────────────────────────────────────
 program
@@ -95,9 +105,7 @@ program
     '--dry-run',
     'Preview verification without writing to MEMORY.md',
   )
-  .action(async (options) => {
-    await verifyCommand(options);
-  });
+  .action(verifyCommand);
 
 // ── mythos dream ─────────────────────────────────────────────
 program
@@ -108,18 +116,14 @@ program
     '--dry-run',
     'Preview compression without writing to MEMORY.md',
   )
-  .action(async (options) => {
-    await dreamCommand(options);
-  });
+  .action(dreamCommand);
 
 // ── mythos stats ─────────────────────────────────────────────
 program
   .command('stats')
   .description('Show budget analytics and token usage across sessions')
   .option('-d, --days <n>', 'Filter metrics by the last N days')
-  .action(async (options) => {
-    await statsCommand(options);
-  });
+  .action(statsCommand);
 
 // ── mythos providers ─────────────────────────────────────────
 program
@@ -127,17 +131,12 @@ program
   .description('Live dashboard of provider health, EMA scoring, and routing decisions')
   .option('-w, --watch', 'Auto-refresh the dashboard when metrics change')
   .option('--verbose', 'Show full error stacks for recent failures')
-  .action(async (options) => {
-    await providersCommand(options);
-  });
+  .action(providersCommand);
 
 // ── Default: show help ───────────────────────────────────────
 if (process.argv.length <= 2) {
-  // Import banner and show it before help
-  import('./utils.js').then(({ BANNER }) => {
-    console.log(BANNER);
-    program.help();
-  });
+  console.log(BANNER);
+  program.help();
 } else {
-  program.parse();
+  program.parseAsync();
 }
