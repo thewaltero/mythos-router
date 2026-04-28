@@ -22,6 +22,10 @@ export const DEFAULT_MAX_TOKENS_PER_SESSION = 500_000;
 export const DEFAULT_MAX_TURNS = 25;
 export const BUDGET_WARN_PERCENT = 80;
 
+// ── Model Output Token Limits ────────────────────────────────
+export const MAX_OUTPUT_TOKENS_STREAM = 16384;
+export const MAX_OUTPUT_TOKENS_SEND = 8192;
+
 // ── Anthropic Pricing (USD per token) ────────────────────────
 // Claude Opus 4.7 pricing as of 2026-04.
 // NOTE: Opus 4.7 uses a new tokenizer. While per-token prices are identical to 4.6,
