@@ -19,6 +19,7 @@
 - `src/utils.ts` — Terminal colors, spinner, formatting, badges, confirm prompt
 - `src/index.ts` — Public SDK exports (SWDEngine, parseActions, etc.)
 - `src/commands/chat.ts` — Interactive REPL (ChatSession orchestrator + ChatUI abstraction)
+- `src/commands/init.ts` — Project initialization (environment checks, provider detection, scaffolding)
 - `src/commands/verify.ts` — Codebase ↔ Memory drift scanner (dry-run aware)
 - `src/commands/dream.ts` — Memory compression (dry-run aware)
 - `src/commands/stats.ts` — Budget analytics reporter
@@ -61,10 +62,13 @@ npx tsx src/cli.ts dream
 npx tsx src/cli.ts dream --dry-run
 npx tsx src/cli.ts stats
 npx tsx src/cli.ts stats --days 7
+npx tsx src/cli.ts init
+npx tsx src/cli.ts init --force
 
 # Or via npm scripts
 npm run chat
 npm run verify
 npm run dream
 npm run stats
+npm run init
 ```
