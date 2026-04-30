@@ -52,6 +52,7 @@ Zero slop. Zero hallucinated state. Full adaptive thinking.
 
 | Feature | Description |
 |---------|-------------|
+|  **mythos init** | Single-command project onboarding with environment validation and scaffolding |
 |  **Multi-Provider Fallback** | Auto-routes between Anthropic, DeepSeek, and OpenAI with circuit breakers |
 |  **Skills Protocol** | Inject modular expert plugins via YAML frontmatter (`-s mcp`, `-s react`) |
 |  **Deterministic Caching** | SQLite-backed caching for zero-cost, zero-latency repetitive reasoning *(Node 22+)* |
@@ -108,7 +109,8 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 export OPENAI_API_KEY="sk-proj-..."
 export DEEPSEEK_API_KEY="sk-..."
 
-# Go
+# Initialize and start
+mythos init
 mythos chat
 ```
 
@@ -130,6 +132,13 @@ npm run chat
 ---
 
 ## Usage
+
+### `mythos init` — Project Onboarding
+
+```bash
+mythos init                  # Initialize mythos-router in the current project
+mythos init --force          # Re-scaffold files even if they already exist
+```
 
 ### `mythos chat` — Interactive Session
 
@@ -419,6 +428,11 @@ MIT
 ---
 
 ## Disclaimer
+
+This project is an independent open-source tool built on top of the Anthropic API. It is not affiliated with or endorsed by Anthropic.
+
+<div align="center"><sub>Built for structured AI agent workflows with verifiable execution.</sub></div>
+
 
 This project is an independent open-source tool built on top of the Anthropic API. It is not affiliated with or endorsed by Anthropic.
 
