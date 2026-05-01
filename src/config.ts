@@ -5,8 +5,8 @@
 
 export const MODELS: Record<string, string> = {
   high: 'claude-opus-4-7',
-  medium: 'claude-sonnet-3-5',
-  low: 'claude-haiku-3',
+  medium: 'claude-sonnet-4-6',
+  low: 'claude-haiku-4-5-20251001',
 };
 
 export const MAX_CORRECTION_RETRIES = 2;
@@ -32,8 +32,8 @@ export const MAX_OUTPUT_TOKENS_SEND = 8192;
 // it requires up to ~59% more tokens for English text, making it effectively more expensive.
 // Update these when Anthropic changes rates.
 // Source: https://docs.anthropic.com/en/docs/about-claude/pricing
-export const COST_PER_INPUT_TOKEN = 15 / 1_000_000; // $15.00 / 1M input tokens
-export const COST_PER_OUTPUT_TOKEN = 75 / 1_000_000; // $75.00 / 1M output tokens
+export const COST_PER_INPUT_TOKEN = 5 / 1_000_000; // $5.00 / 1M input tokens
+export const COST_PER_OUTPUT_TOKEN = 25 / 1_000_000; // $25.00 / 1M output tokens
 
 export const DEFAULT_IGNORE_PATTERNS = Object.freeze([
   'node_modules',
