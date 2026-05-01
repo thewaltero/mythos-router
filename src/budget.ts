@@ -74,6 +74,13 @@ export class SessionBudget {
     this.turnCount++;
   }
 
+  // ── Restore state from a saved session ───────────────────
+  restore(inputTokens: number, outputTokens: number, turns: number): void {
+    this.totalInput = inputTokens;
+    this.totalOutput = outputTokens;
+    this.turnCount = turns;
+  }
+
   // ── Check if budget is still ok ──────────────────────────
   check(): BudgetCheck {
     if (!this.enabled) {
