@@ -4,7 +4,6 @@ import { readMemory, initMemory, appendEntry, getMemoryPath } from '../memory.js
 import { DEFAULT_IGNORE_PATTERNS, MYTHOSIGNORE_FILE } from '../config.js';
 import { c, heading, success, warn, error, info, hr, timestamp, dryRunBadge } from '../utils.js';
 
-// ── Verify Command ───────────────────────────────────────────
 export async function verifyCommand(options: { dryRun?: boolean } = {}): Promise<void> {
   const dryRun = options.dryRun === true;
   console.log(heading('SWD Verify — Codebase × Memory Sync'));
@@ -13,17 +12,14 @@ export async function verifyCommand(options: { dryRun?: boolean } = {}): Promise
   }
 
   const cwd = process.cwd();
-  initMemory();
+  initMemory(dryRun);
 
-  // Load ignore patterns
   const ignorePatterns = loadIgnorePatterns(cwd);
 
-  // Scan codebase
   info('Scanning codebase...');
   const files = walkDirectory(cwd, ignorePatterns);
   console.log(`${c.dim}  Found ${c.cyan}${files.length}${c.dim} files${c.reset}`);
 
-  // Read memory
   const { entries, raw } = readMemory();
   console.log(`${c.dim}  Memory has ${c.cyan}${entries.length}${c.dim} entries${c.reset}`);
   console.log();
@@ -34,17 +30,15 @@ export async function verifyCommand(options: { dryRun?: boolean } = {}): Promise
 
   printUntrackedFiles(untrackedFiles, cwd);
 
-  // ── Summary ────────────────────────────────────────────
   console.log(`\n${hr()}`);
   console.log(
     `${c.bold}Summary:${c.reset} ` +
-      `${c.green}${verified} verified${c.reset} · ` +
-      `${c.yellow}${drifted} drift${c.reset} · ` +
-      `${c.red}${missing} missing${c.reset} · ` +
-      `${c.dim}${untrackedFiles.length} untracked${c.reset}`,
+    `${c.green}${verified} verified${c.reset} · ` +
+    `${c.yellow}${drifted} drift${c.reset} · ` +
+    `${c.red}${missing} missing${c.reset} · ` +
+    `${c.dim}${untrackedFiles.length} untracked${c.reset}`,
   );
 
-  // Log verification to memory
   appendEntry(
     `verify: scanned ${files.length} files`,
     `✅ ${verified} ok, ⚠️ ${drifted} drift, ❌ ${missing} missing`,
@@ -60,21 +54,17 @@ export async function verifyCommand(options: { dryRun?: boolean } = {}): Promise
   }
 }
 
-// ── Refactored Verification Helpers ──────────────────────────
 
 type MemoryEntry = { action: string; result: string };
 
 function extractMentionedPaths(entries: MemoryEntry[]): Set<string> {
   const mentionedPaths = new Set<string>();
+  const re = /(?:CREATE|MODIFY|DELETE|READ):\s*([^;|]+)(?:;|$)/gi;
+
   for (const entry of entries) {
-    const pathMatches = entry.action.match(/(?:CREATE|MODIFY|DELETE|READ|chat):\s*(.+?)(?:;|$)/gi);
-    if (pathMatches) {
-      for (const match of pathMatches) {
-        const path = match.replace(/^(?:CREATE|MODIFY|DELETE|READ|chat):\s*/i, '').trim();
-        if (path && !path.startsWith('chat:')) {
-          mentionedPaths.add(path);
-        }
-      }
+    for (const match of entry.action.matchAll(re)) {
+      const path = match[1]?.trim();
+      if (path) mentionedPaths.add(path);
     }
   }
   return mentionedPaths;
@@ -139,12 +129,11 @@ function printUntrackedFiles(untrackedFiles: string[], cwd: string): void {
   }
 }
 
-// ── Directory Walker ─────────────────────────────────────────
 function walkDirectory(dir: string, ignorePatterns: string[]): string[] {
   const results: string[] = [];
 
   function walk(currentDir: string, depth: number) {
-    if (depth > 10) return; // safety limit
+    if (depth > 10) return;
 
     try {
       const entries = readdirSync(currentDir, { withFileTypes: true });
@@ -152,7 +141,6 @@ function walkDirectory(dir: string, ignorePatterns: string[]): string[] {
         const name = entry.name;
         const full = join(currentDir, name);
 
-        // Check against ignore patterns
         if (shouldIgnore(name, full, dir, ignorePatterns)) continue;
 
         if (entry.isDirectory()) {
@@ -162,7 +150,6 @@ function walkDirectory(dir: string, ignorePatterns: string[]): string[] {
         }
       }
     } catch {
-      // Permission denied, etc.
     }
   }
 
@@ -170,7 +157,6 @@ function walkDirectory(dir: string, ignorePatterns: string[]): string[] {
   return results;
 }
 
-// ── Ignore logic ─────────────────────────────────────────────
 function loadIgnorePatterns(cwd: string): string[] {
   const patterns = [...DEFAULT_IGNORE_PATTERNS];
   const ignorePath = resolve(cwd, MYTHOSIGNORE_FILE);
@@ -196,12 +182,11 @@ function shouldIgnore(
     if (name === pattern) return true;
     if (pattern.startsWith('*.') && name.endsWith(pattern.slice(1))) return true;
     if (name.startsWith('.') && !pattern.startsWith('.')) continue;
-    if (name.startsWith('.')) return true; // ignore hidden by default
+    if (name.startsWith('.')) return true;
   }
   return false;
 }
 
-// ── Utilities ────────────────────────────────────────────────
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
   if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)}KB`;
