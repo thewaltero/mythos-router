@@ -242,6 +242,8 @@ export function buildSkillPrompt(basePrompt: string, skillNames: string[]): {
   maxOutputTokens?: number;
   timeoutMs?: number;
   forceProvider?: string;
+  allowFallback?: boolean;
+  requiresTools?: boolean;
 } {
   if (skillNames.length === 0) {
     return { prompt: basePrompt, skills: [], budgetMultiplier: 1.0 };
@@ -279,6 +281,9 @@ export function buildSkillPrompt(basePrompt: string, skillNames: string[]): {
     .reduce((min, s) => Math.min(min, s.meta.timeoutMs!), Infinity);
   const forceProvider = skills.find(s => s.meta.forceProvider)?.meta.forceProvider;
 
+  const allowFallback = skills.every(s => s.meta.allowFallback !== false);
+  const requiresTools = skills.some(s => s.meta.requiresTools && s.meta.requiresTools.length > 0);
+
   return {
     prompt,
     skills,
@@ -286,6 +291,8 @@ export function buildSkillPrompt(basePrompt: string, skillNames: string[]): {
     maxOutputTokens: maxOutputTokens === Infinity ? undefined : maxOutputTokens,
     timeoutMs: timeoutMs === Infinity ? undefined : timeoutMs,
     forceProvider,
+    allowFallback,
+    requiresTools,
   };
 }
 
