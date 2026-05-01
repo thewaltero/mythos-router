@@ -85,10 +85,11 @@ export class AnthropicProvider implements BaseProvider {
 
     let stream;
     try {
+      const supportsAdaptive = model.includes('opus') || model.includes('sonnet');
       stream = await this.client.messages.stream({
         model,
         max_tokens: maxTokens,
-        thinking: { type: 'adaptive' },
+        ...(supportsAdaptive ? { thinking: { type: 'adaptive' } } : {}),
         output_config: { effort: (options.effort as 'high' | 'medium' | 'low') || 'high' },
         system: systemPrompt,
         messages: apiMessages,
@@ -174,10 +175,11 @@ export class AnthropicProvider implements BaseProvider {
 
     let response;
     try {
+      const supportsAdaptive = model.includes('opus') || model.includes('sonnet');
       response = await this.client.messages.create({
         model,
         max_tokens: maxTokens,
-        thinking: { type: 'adaptive' },
+        ...(supportsAdaptive ? { thinking: { type: 'adaptive' } } : {}),
         output_config: { effort: (options.effort as 'high' | 'medium' | 'low') || 'low' },
         system: systemPrompt,
         messages: apiMessages,
