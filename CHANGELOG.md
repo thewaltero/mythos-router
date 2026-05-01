@@ -7,29 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.5.3] — 2026-05-01
+
+### Fixed
+
+- **Graceful Shutdown** — Removed competing `process.exit(0)` calls from `cli.ts` and `telemetry.ts` SIGINT handlers. Chat's `safeExit()` now fully owns the exit lifecycle, ensuring session save, metrics, and finalization always complete on Ctrl+C.
+- **SWD Content Preservation** — Replaced `.trim()` with precise boundary-newline removal in `parseActions()` so file content whitespace (leading spaces, trailing newlines, blank lines) is preserved exactly.
+- **Verify False Positives** — Fixed regex in `extractMentionedPaths()` that was including `chat:` entries and trailing semicolons as file paths, causing phantom "missing file" reports.
+- **Session Resume Turn Count** — Added `SessionBudget.restore()` so resumed sessions correctly hydrate token and turn counts instead of resetting to 1.
+
+### Security
+- **Shell Safety** — `git.ts` uses `execFileSync` with argument arrays instead of string interpolation.
+
+---
+
 ## [1.5.0] — 2026-04-30
 
 ### Added
-- **`mythos init` Command**: One-shot project onboarding that:
-  - validates environment (Node.js, SQLite, Git)
-  - detects providers with actionable fix hints
-  - scaffolds `.mythosignore`, `MEMORY.md`, and skills directory
+- **`mythos init` Command** — Single-command project onboarding with environment validation (Node.js version, SQLite, Git), provider detection with actionable fix hints, and automatic scaffolding of `.mythosignore`, `MEMORY.md`, and skills directory.
+- **Project Scaffolding** — Automatically creates `.mythosignore` with sensible defaults to prevent accidental scanning of `node_modules` and other build artifacts.
 
 ### Changed
-- **CLI Output Clarity**: Replaced internal terminology (e.g., "derivative index") with user-facing language ("memory index").
+- **Polished CLI Output** — Simplified internal jargon in user-facing logs (e.g., "derivative index" → "memory index").
+- **Experimental Warning Suppression** — Automatically suppresses Node.js `ExperimentalWarning` for SQLite to maintain a premium, stable CLI experience.
+- **Provider Clarity** — Explicitly labels Anthropic as `required` and others as `optional` during initialization, providing clearer setup instructions.
+
+### Fixed
+- **Dead Code Cleanup** — Removed orphan Next.js API routes that were accidentally included in the CLI repository.
 
 ---
 
 ## [1.4.0] — 2026-04-27
 
 ### Added
-- **Session persistence & resume support**: Sessions are now atomically saved to `~/.mythos-router/sessions/latest.json` on exit. `mythos chat --resume` restores conversation history and budget state.
-- **Context window guard**: Automatically compresses the oldest portion of conversation history when approaching token limits using a low-effort summarization step. Prevents context overflow crashes during long sessions.
+- **Session persistence & resume support** — Sessions are now atomically saved to `~/.mythos-router/sessions/latest.json` on exit. `mythos chat --resume` restores conversation history and budget state.
+- **Context window guard** — Automatically compresses the oldest portion of conversation history when approaching token limits using a low-effort summarization step. Prevents context overflow crashes during long sessions.
 
 ### Fixed
-- **CLI signal handling**: Improved handling of `SIGINT`, `SIGTERM`, and `uncaughtException`, ensuring terminal state is restored and sessions are safely persisted on exit or crash.
-- **Commander.js lifecycle**: Switched to `program.parseAsync()` to properly handle async command execution and prevent unhandled promise issues.
-- **Startup race condition**: Removed a dynamic import in the default help path that could cause banner inconsistencies in some environments.
+- **CLI signal handling** — Improved handling of `SIGINT`, `SIGTERM`, and `uncaughtException`, ensuring terminal state is restored and sessions are safely persisted on exit or crash.
+- **Commander.js lifecycle** — Switched to `program.parseAsync()` to properly handle async command execution and prevent unhandled promise issues.
+- **Startup race condition** — Removed a dynamic import in the default help path that could cause banner inconsistencies in some environments.
 
 ---
 
@@ -43,98 +60,101 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Provider Concurrency**: Fixed a decrement scoping bug in the `ProviderOrchestrator` ensuring `maxConcurrency` limits are strictly enforced even under parallel SDK usage.
 - **SQLite Compatibility**: Centralized `node:sqlite` loading into a single robust loader module, allowing the tool to fail gracefully instead of crashing on unsupported Node environments.
 
----
-
 ## [1.3.0] — 2026-04-26
 
 ### Added
-- **Provider Observability Dashboard**: Added the `mythos providers` command. A real-time, terminal-based dashboard that surfaces EMA latency trends, success rates, circuit breaker recovery ETAs, and a live "Leader" score. Includes a zero-flicker `--watch` mode.
-- **SQLite Telemetry Backend**: Orchestration events are now persistently streamed to a dedicated `telemetry.db` using WAL pragmas and an asynchronous batching queue to guarantee zero hot-path blocking.
-- **Contextual Decision Tracing**: The engine no longer just routes; it explains *why*. Routing traces now explicitly capture task type (`chat`, `code`, `analysis`), input token buckets, and latency-vs-success-rate reasoning logs.
-- **Automated Retention Policies**: The telemetry engine aggressively self-prunes history, maintaining only the last 1,000 routing events and truncating error stack traces to prevent long-term database bloat.
+- **Provider Observability Dashboard** — Added the `mythos providers` command. A real-time, terminal-based dashboard that surfaces EMA latency trends, success rates, circuit breaker recovery ETAs, and a live "Leader" score. Includes a zero-flicker `--watch` mode.
+- **SQLite Telemetry Backend** — Orchestration events are now persistently streamed to a dedicated `telemetry.db` using WAL pragmas and an asynchronous batching queue to guarantee zero hot-path blocking.
+- **Contextual Decision Tracing** — The engine no longer just routes; it explains *why*. Routing traces now explicitly capture task type (`chat`, `code`, `analysis`), input token buckets, and latency-vs-success-rate reasoning logs.
+- **Automated Retention Policies** — The telemetry engine aggressively self-prunes history, maintaining only the last 1,000 routing events and truncating error stack traces to prevent long-term database bloat.
 
----
-
-## [1.2.1] — 2026-04-24
+## [1.2.1]
 
 ### Added
-- **Multi Provider Orchestration Engine**: Decoupled the core application from the Anthropic SDK. The system now supports fallback routing, adaptive watchdogs, circuit breakers, and EMA-based performance scoring across multiple providers.
-- **OpenAI & DeepSeek Support**: Added a native, zero-dependency `fetch`-based provider (`OpenAIProvider`) to seamlessly support OpenAI and DeepSeek endpoints (including streaming reasoning content for `o1` and `DeepSeek-R1`).
-- **Skills Protocol**: Modular expert plugins via zero-dependency YAML frontmatter parsing. Skills (`-s <skill>`) can inject customized instructions, modify budget multipliers, and enforce deterministic provider selection.
-- **Deterministic Response Caching**: SQLite-backed response caching for pure reasoning requests (like `verify` or `dream`). Bypass rule strictly ensures file mutating responses are never cached.
-- **Centralized Pricing Registry**: Unified token cost calculator across different providers, feeding exact financial data into the budget metrics.
-- **Auto-Healing TDD Loop**: Bounded, error-driven autonomy. Passing `--test-cmd` will automatically execute tests after a successful SWD mutation. If tests fail, the CLI intercepts `stderr`, truncates it, identifies TS/Runtime issues, and feeds it back to Claude for a self healing iteration.
-- **TDD Anti-Thrashing Guards**: The orchestrator will automatically abort the healing loop if Claude attempts the exact same fix or if output remains identically broken, preventing runaway API costs.
-  
+- **Multi-Provider Orchestration Engine** — Decoupled the core application from the Anthropic SDK. The system now supports fallback routing, adaptive watchdogs, circuit breakers, and EMA-based performance scoring across multiple providers.
+- **OpenAI & DeepSeek Support** — Added a native, zero-dependency `fetch`-based provider (`OpenAIProvider`) to seamlessly support OpenAI and DeepSeek endpoints (including streaming reasoning content for `o1` and `DeepSeek-R1`).
+- **Skills Protocol** — Modular expert plugins via zero-dependency YAML frontmatter parsing. Skills (`-s <skill>`) can inject customized instructions, modify budget multipliers, and enforce deterministic provider selection.
+- **Deterministic Response Caching** — SDK utility for SQLite-backed response caching for pure-reasoning requests. Bypass rule strictly ensures file-mutating responses are never cached.
+- **Centralized Pricing Registry** — Unified token cost calculator across different providers, feeding exact financial data into the budget metrics.
+- **Auto-Healing TDD Loop** — Bounded, error-driven autonomy. Passing `--test-cmd` will automatically execute tests after a successful SWD mutation. If tests fail, the CLI intercepts `stderr`, truncates it, identifies TS/Runtime issues, and feeds it back to Claude for a self-healing iteration.
+- **TDD Anti-Thrashing Guards** — The orchestrator will automatically abort the healing loop if Claude attempts the exact same fix or if output remains identically broken, preventing runaway API costs.
+- **Contributor Covenant** — Added `CODE_OF_CONDUCT.md` to formally establish community standards.
+
+### Fixed
+- **Stable Provider Fallback** — Fixed an edge case in the `ProviderOrchestrator` where identical EMA scores (e.g., at startup) could cause unpredictable provider routing due to JS `sort()` instability. The engine now explicitly respects user-configured priorities as a tie-breaker.
+
 ### Security
-- **CodeQL Integration**: Added GitHub CodeQL scanning
+- **CodeQL Integration** — Added GitHub CodeQL scanning badge to `README.md`.
+- **Dependency Audit** — Triaged and validated false-positive Socket.dev supply chain alerts for `@anthropic-ai/sdk`.
 
 ---
-
 ## [1.2.0] — 2026-04-23
 
 ### Added
-- **SWDEngine v1 API**: Transactional filesystem execution kernel with `Plan → Snapshot → Execute → Verify → Rollback` lifecycle. Single entry point: `engine.run(actions)`.
-- **ChatUI Abstraction**: Decoupled chat session logic from the terminal via a `ChatUI` interface. `ChatSession` is now a pure orchestrator, fully testable and reusable outside the CLI.
-- **TerminalUI Implementation**: CLI-specific `ChatUI` adapter wrapping the Spinner and ANSI output.
-- **SWD Lifecycle Hooks**: Extensibility layer (`onAction`, `onVerify`, `onRollback`) allowing consumers to inject logging, telemetry, or custom UI into the engine.
-- **Rollback Auditability**: `SWDRunResult.rollbackErrors` field captures and reports rollback failures instead of silently swallowing them.
-- **`swd-cli.ts`**: Separated SWD terminal presentation (verification output, dry-run preview, verbose traces) from the pure execution kernel.
-- **Git Sandbox**: `ChatSession.setupSandbox()` for automated `mythos/` branch creation with nested-sandboxing protection.
+- **SWDEngine v1 API** — Transactional filesystem execution kernel with `Plan → Snapshot → Execute → Verify → Rollback` lifecycle. Single entry point: `engine.run(actions)`.
+- **ChatUI Abstraction** — Decoupled chat session logic from the terminal via a `ChatUI` interface. `ChatSession` is now a pure orchestrator, fully testable and reusable outside the CLI.
+- **TerminalUI Implementation** — CLI-specific `ChatUI` adapter wrapping the Spinner and ANSI output.
+- **SWD Lifecycle Hooks** — Extensibility layer (`onAction`, `onVerify`, `onRollback`) allowing consumers to inject logging, telemetry, or custom UI into the engine.
+- **Rollback Auditability** — `SWDRunResult.rollbackErrors` field captures and reports rollback failures instead of silently swallowing them.
+- **`swd-cli.ts`** — Separated SWD terminal presentation (verification output, dry-run preview, verbose traces) from the pure execution kernel.
+- **Git Sandbox** — `ChatSession.setupSandbox()` for automated `mythos/` branch creation with nested-sandboxing protection.
 
 ### Changed
-- **SWD Kernel is now I/O-free**: `swd.ts` contains zero `console.log` calls. All presentation lives in `swd-cli.ts`.
+- **SWD Kernel is now I/O-free** — `swd.ts` contains zero `console.log` calls. All presentation lives in `swd-cli.ts`.
+- **`validateApiKey()` throws instead of `process.exit(1)`** — library-safe error handling.
+- **SDK exports (`index.ts`) fully updated** — removed dead symbols (`runSWD`, `parseFileActions`, `snapshotFiles`), added `SWDEngine`, `parseActions`, `SessionBudget`, `ChatUI`, and all v1 types.
 
 ### Fixed
-- **Snapshot memoization bug**: `InternalSessionContext.getSnapshot('after')` was returning stale cached state on multi-action same-file scenarios. After snapshots now always re-read disk state.
+- **🔴 Snapshot memoization bug** — `InternalSessionContext.getSnapshot('after')` was returning stale cached state on multi-action same-file scenarios. After snapshots now always re-read disk state.
+- **🔴 Broken `index.ts` exports** — SDK entry point was referencing pre-refactor symbols that no longer existed.
 
 ---
 
 ## [1.1.9] — 2026-04-22
 
 ### Added
-- **Budget Analytics & Cost Profiling**: Persistent tracking of token usage and API costs across all sessions, projects, and commands.
-- **`mythos stats` Command**: New reporting engine for financial transparency. Aggregate costs by command, project, or time period (last N days).
-- **Global Metrics Store**: Local append-only JSON store in `~/.mythos-router/metrics.json` for cross-project financial auditing.
-- **Session Instrumentation**: Automated recording of chat sessions and memory compression (dream) events.
+- **Budget Analytics & Cost Profiling** — Persistent tracking of token usage and API costs across all sessions, projects, and commands.
+- **`mythos stats` Command** — New reporting engine for financial transparency. Aggregate costs by command, project, or time period (last N days).
+- **Global Metrics Store** — Local append-only JSON store in `~/.mythos-router/metrics.json` for cross-project financial auditing.
+- **Session Instrumentation** — Automated recording of chat sessions and memory compression (dream) events.
 
 ---
 
 ## [1.1.8] — 2026-04-20
 
 ### Added
-- **Self-Healing Memory (V4)**: Re-architected memory system with a dual Authority/Derivative model. `MEMORY.md` remains the sole source of truth, backed by a rebuildable SQLite index.
-- **SQLite Derivative Index**: High-performance query acceleration layer using `node:sqlite`.
-- **FTS5 Smart Search**: Intelligent, ranked text retrieval via FTS5 virtual tables with `unicode61` tokenization.
-- **Integrity Signposting**: SHA-256 manifest hashing on startup ensuring zero drift between the authoritative log and the search index.
-- **Atomic Rebuilds**: Transactional reconstruction logic (`BEGIN/COMMIT`) to ensure index consistency even during hard crashes.
+- **Self-Healing Memory (V4)** — Re-architected memory system with a dual Authority/Derivative model. `MEMORY.md` remains the sole source of truth, backed by a rebuildable SQLite index.
+- **SQLite Derivative Index** — High-performance query acceleration layer using `node:sqlite`.
+- **FTS5 Smart Search** — Intelligent, ranked text retrieval via FTS5 virtual tables with `unicode61` tokenization.
+- **Integrity Signposting** — SHA-256 manifest hashing on startup ensuring zero drift between the authoritative log and the search index.
+- **Atomic Rebuilds** — Transactional reconstruction logic (`BEGIN/COMMIT`) to ensure index consistency even during hard crashes.
 
 ### Changed
-- **O(1) Append Protocol**: Optimized logging to use `appendFileSync` for better performance and durability under load.
-- **Hardened Test Suite**: Expanded testing to verify SQLite initialization, FTS5 search ranking, and recovery logic.
+- **O(1) Append Protocol** — Optimized logging to use `appendFileSync` for better performance and durability under load.
+- **Hardened Test Suite** — Expanded testing to verify SQLite initialization, FTS5 search ranking, and recovery logic.
 
 ---
 
 ## [1.1.7] — 2026-04-19
 
 ### Added
-- **Interactive Inline Diffs**: High-fidelity terminal previews for dry-run mode. Review exact line changes with ANSI coloring and line numbering before applying.
-- **Myers Diff Engine**: Implemented a zero-dependency, line-based shortest-edit-script algorithm in `src/diff.ts`.
+- **Interactive Inline Diffs** — High-fidelity terminal previews for dry-run mode. Review exact line changes with ANSI coloring and line numbering before applying.
+- **Myers Diff Engine** — Implemented a zero-dependency, line-based shortest-edit-script algorithm in `src/diff.ts`.
 
 ### Changed
-- **SWD Protocol Upgrade**: Updated the "Capybara" system prompt to include the `CONTENT` field for 100% verifiability of file operations.
-- **Enhanced Regex Parsing**: Robust multi-line block extraction for complex code transfers.
+- **SWD Protocol Upgrade** — Updated the "Capybara" system prompt to include the `CONTENT` field for 100% verifiability of file operations.
+- **Enhanced Regex Parsing** — Robust multi-line block extraction for complex code transfers.
 
 ---
 
 ## [1.1.6] — 2026-04-19
 
 ### Added
-- **Atomic SWD Rollbacks**: Transactional filesystem safety. If any file action in a batch fails verification, the entire operation is reverted to its pristine state.
-- **Claude Opus 4.7 Support**: Official integration as the default `high` effort model.
-- **Adaptive Thinking Protocol**: Real-time streaming of model reasoning in the CLI REPL.
-- **Enhanced Dry-Run Previews**: Per-action confirmation prompts with detailed diff-style metadata.
-- **Adaptive Thinking Mode**: Full support in `client.ts` for thought-process streaming.
+- **Atomic SWD Rollbacks** — Transactional filesystem safety. If any file action in a batch fails verification, the entire operation is reverted to its pristine state.
+- **Claude Opus 4.7 Support** — Official integration as the default `high` effort model.
+- **Adaptive Thinking Protocol** — Real-time streaming of model reasoning in the CLI REPL.
+- **Enhanced Dry-Run Previews** — Per-action confirmation prompts with detailed diff-style metadata.
+- **Adaptive Thinking Mode** — Full support in `client.ts` for thought-process streaming.
 
 ### Changed
 - Updated model identifiers for Claude Opus 4.7 compatibility.
@@ -153,38 +173,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.1.3] — 2026-04-17
 
 ### Added
-- **Programmable SDK API**: Added the `src/index.ts` entry point and updated package module resolution.
-- **Exposed Modules**: Native export of `{ runSWD, streamMessage, snapshotFiles }` for external integration.
-- **SDK Documentation**: Integrated a new SDK Usage guide into the `README.md`.
+- **Programmable SDK API** — Added the `src/index.ts` entry point and updated package module resolution.
+- **Exposed Modules** — Native export of `{ runSWD, streamMessage, snapshotFiles }` for external integration.
+- **SDK Documentation** — Integrated a new SDK Usage guide into the `README.md`.
 
 ---
 
 ## [1.1.2] — 2026-04-17
 
 ### Added
-- **Multi-Model Orchestration**: Dynamic routing engine delegating tasks by effort (Opus 4.7 for Thinking, Sonnet 3.5 for Writing, Haiku 3 for Verifying).
-- **Dynamic CLI Badging**: Terminal now explicitly displays the exact model assigned to the current session.
-- **Protocol Tokenomics**: Added the official `TOKENOMICS.md`, formalizing the $MYTHOS Reasoning Tier Matrix.
+- **Multi-Model Orchestration** — Dynamic routing engine delegating tasks by effort (Opus 4.7 for Thinking, Sonnet 4.6 for Writing, Haiku 4.5 for Verifying).
+- **Dynamic CLI Badging** — Terminal now explicitly displays the exact model assigned to the current session.
+- **Protocol Tokenomics** — Added the official `TOKENOMICS.md`, formalizing the $MYTHOS Reasoning Tier Matrix.
 
 ---
 
 ## [1.1.1] — 2026-04-12
 
 ### Fixed
-- **Zero-Drift Accuracy**: Filesystem scanner now recursively snapshots subdirectories for 100% drift detection.
-- **True Dry-Run**: Fixed an issue where `MEMORY.md` was being created on disk even with the `--dry-run` flag.
-- **Memory Example**: Enriched the default `MEMORY.md` to reflect real sessions with file modifications.
-- **Codebase Polish**: Removed unused imports and obsolete Git-status checks.
+- **File Existence Accuracy** — Filesystem scanner recursively checks file existence for basic drift detection.
+- **True Dry-Run** — Fixed an issue where `MEMORY.md` was being created on disk even with the `--dry-run` flag.
+- **Memory Example** — Enriched the default `MEMORY.md` to reflect real sessions with file modifications.
+- **Codebase Polish** — Removed unused imports and obsolete Git-status checks.
 
 ---
 
 ## [1.1.0] — 2026-03-31
 
 ### Added
-- **Financial Safety**: Hard budget cap and token tracker to prevent bill-shock.
-- **Dry-Run Mode**: Preview all file operations with `[Y/n]` prompts before execution.
-- **Strict Write Discipline**: Enhanced verification logic for cleaner code.
-- **Zero-Drift Scanning**: Initial `verify` command implementation.
+- **Financial Safety** — Budget limits and token tracker to help prevent bill-shock.
+- **Dry-Run Mode** — Preview all file operations with `[Y/n]` prompts before execution.
+- **Strict Write Discipline** — Enhanced verification logic for cleaner code.
+- **Codebase Verification** — Initial `verify` command implementation.
 
 ---
 
@@ -192,16 +212,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Initial release of mythos-router.
-- **Strict Write Discipline (SWD)**: pre/post filesystem snapshot verification.
-- **Adaptive Thinking**: Claude Opus with configurable effort levels.
-- **Self-Healing Memory**: `MEMORY.md` auto-logging with verification status.
-- **Correction Turns**: max 2 retries before yielding to human.
-- **Dream/Verify Commands**: memory compression and drift detection.
+- **Strict Write Discipline (SWD)** — pre/post filesystem snapshot verification.
+- **Adaptive Thinking** — Claude Opus with configurable effort levels.
+- **Self-Healing Memory** — `MEMORY.md` auto-logging with verification status.
+- **Correction Turns** — max 2 retries before yielding to human.
+- **Dream/Verify Commands** — memory compression and drift detection.
 
-[1.5.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.5.0
-[1.4.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.4.0
-[1.3.1]: https://github.com/thewaltero/mythos-router/releases/tag/v1.3.1
-[1.3.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.3.0
+
 [1.2.1]: https://github.com/thewaltero/mythos-router/releases/tag/v1.2.1
 [1.2.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.2.0
 [1.1.9]: https://github.com/thewaltero/mythos-router/releases/tag/v1.1.9
