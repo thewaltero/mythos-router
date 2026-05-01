@@ -4,7 +4,7 @@
 [![CodeQL](https://github.com/thewaltero/mythos-router/actions/workflows/github-code-scanning/codeql/badge.svg?branch=main)](https://github.com/thewaltero/mythos-router/actions/workflows/github-code-scanning/codeql)
 [![npm](https://img.shields.io/npm/v/mythos-router?style=flat-square&color=cc785c)](https://www.npmjs.com/package/mythos-router)
 [![Node.js](https://img.shields.io/badge/Node.js-20+-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://typescriptlang.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://typescriptlang.org)
 [![Claude](https://img.shields.io/badge/Claude-Opus_4.7-cc785c?style=flat-square)](https://anthropic.com)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](./LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/thewaltero/mythos-router?style=social)](https://github.com/thewaltero/mythos-router)
@@ -13,6 +13,7 @@
 ## Claude Opus 4.7 · Strict Write Discipline · Zero Slop
 **A local CLI power tool for verifiable AI-assisted coding.**
 
+<br />
 
 [What is this?](#what-is-this) • [Features](#features) • [Installation](#installation) • [Usage](#usage) • [Architecture](#architecture) • [Token Budget](#token-usage--budget) • [SDK](#-sdk-usage-for-agentic-systems)
 
@@ -80,23 +81,23 @@ Choose the right model for the job via the `--effort` flag:
 | Effort | Model | Best For |
 |--------|-------|----------|
 |  `high` (default) | Claude Opus 4.7 | Architecture, deep reasoning, complex refactors |
-|  `medium` | Claude Sonnet 3.5 | Balanced code generation, everyday tasks |
-|  `low` | Claude Haiku 3 | Quick answers, memory compression, verification |
+|  `medium` | Claude Sonnet 4.6 | Balanced code generation, everyday tasks |
+|  `low` | Claude Haiku 4.5 | Quick answers, memory compression, verification |
 
-The `dream` command automatically uses `low` effort (Haiku) for cost-efficient memory compression, and `verify` uses lightweight scanning — so you only burn Opus tokens when you need deep reasoning.
+The `dream` command automatically uses `low` effort (Haiku 4.5) for cost-efficient memory compression, and `verify` uses lightweight scanning — so you only burn Opus tokens when you need deep reasoning.
 
 ### 2. Authority-Based "Self-Healing" Memory
 Most agentic systems stored state in opaque databases or messy JSON files. Mythos Router treats `MEMORY.md` as the **Sole Authority**. 
 
 Every action is logged in Markdown first. On startup, the system verifies the integrity of the log via SHA-256 manifest hashing and reconstructs a high-performance **Derivative SQLite Index** (FTS5). If the index drifts or the database is deleted, the system self-heals by rebuilding from the authoritative Markdown source.
 
-As memory approaches capacity, the `dream` command delegates a compression phase to a low-cost model (Haiku 3), ensuring your "Sacred Log" is always lean and relevant.
+As memory approaches capacity, the `dream` command delegates a compression phase to a low-cost model (Haiku 4.5), ensuring your "Sacred Log" is always lean and relevant.
 
 ---
 
 ## Installation
 
-> **Node.js Version Requirement:** The core CLI runs perfectly on **Node 20+**. However, the advanced SQLite-backed features (Telemetry Dashboard, Deterministic Caching, and High-Performance Memory Index) require **Node.js 22.12.0+**. If you run the tool on an older version, these features will safely and silently degrade to a no-op without crashing the router.
+> **Node.js Version Requirement:** The core CLI runs perfectly on **Node 20+**. However, the advanced SQLite-backed features (Telemetry Dashboard, Deterministic Caching, and High-Performance Memory Index) require **Node.js 22.5.0+**. If you run the tool on an older version, these features safely degrade with a warning without crashing the router.
 
 ### Quick Start (npm)
 
@@ -146,8 +147,8 @@ mythos init --force          # Re-scaffold files even if they already exist
 mythos chat                  # Full power (high effort, Opus 4.7)
 mythos chat -s react         # Load the 'react' expert skill
 mythos chat --test-cmd "npm test" # Enable autonomous test-driven self-healing
-mythos chat --effort low     # Budget mode (Haiku 3)
-mythos chat --effort medium  # Balanced (Sonnet 3.5)
+mythos chat --effort low     # Budget mode (Haiku 4.5)
+mythos chat --effort medium  # Balanced (Sonnet 4.6)
 mythos chat --resume         # Resume your previous session exactly where you left off
 mythos chat --dry-run        # Preview all file changes before executing
 mythos chat --verbose        # See full SWD traces and thinking
@@ -155,7 +156,7 @@ mythos chat --branch refactor # Isolate session in a fresh git branch
 mythos chat --dry-run --verbose  # Maximum transparency
 ```
 
-####  Financial Safety — Never Burn Money Again
+####  Financial Safety — Budget Limiter
 
 ```bash
 mythos chat                           # Default: 500K tokens, 25 turns
@@ -171,7 +172,7 @@ The budget limiter tracks every token, turn, and estimated cost in real-time:
 budget: [████████░░░░░░░░░░░░] 78,342/500,000 tokens · [██████░░░░] 12/25 turns · ~$1.2340 · 4m 32s
 ```
 
-At 80%, you get a yellow warning. At 100%, the session performs a **graceful save** — current progress is written to `MEMORY.md` so you can resume context in your next session. No work lost. Use `--no-budget` to disable (at your own risk).
+At 80%, you get a yellow warning. At 100%, the session performs a **graceful save** — current progress is written to `MEMORY.md` so you can resume context in your next session. No work lost. Use `--no-budget` to disable (at your own risk). *Note: The limiter checks token usage between API calls, so a single large response may overshoot the configured limit.*
 
 ####  Dry-Run Mode — The Trust Builder
 
@@ -199,21 +200,17 @@ In dry-run mode, every file operation is previewed before execution:
 ```
 
 In-session commands:
-- `/exit` — End session (shows final budget summary)
-- `/memory` — Show memory status
-- `/budget` — Show current budget consumption
-- `/clear` — Clear conversation (memory persists)
+- `/exit`, `/q` or `quit` — End session (shows final budget summary)
 
-### `mythos verify` — Zero-Drift Codebase Scan
+### `mythos verify` — Codebase ↔ Memory Existence Scan
 
 ```bash
 mythos verify              # Scan and log results to MEMORY.md
 mythos verify --dry-run    # Scan without writing to MEMORY.md
 ```
 
-Scans every file in your project and cross-references against `MEMORY.md`:
-- ✅ **Verified** — File state matches memory
-- ⚠️ **Drift** — File changed but memory doesn't reflect it
+Scans your project and cross-references against `MEMORY.md`:
+- ✅ **Verified** — Memory logs are present and up to date
 - ❌ **Missing** — Memory references a file that doesn't exist
 
 ### `mythos dream` — Memory Compression
@@ -361,12 +358,12 @@ If you prefer to keep it private, add `MEMORY.md` to your `.gitignore`.
 
 ## Token Usage & Budget
 
-### Opus 4.7 Pricing (as of 2026-04)
+### Opus 4.7 Pricing (as of 2026-05)
 
 | Rate | USD |
 |------|-----|
-| Input tokens | $15.00 / 1M tokens |
-| Output tokens | $75.00 / 1M tokens |
+| Input tokens | $5.00 / 1M tokens |
+| Output tokens | $25.00 / 1M tokens |
 
 > ** Tokenizer Cost Inflation Alert**
 > While the per-token price remains identical to Opus 4.6, **Opus 4.7 uses a new tokenizer that is significantly less efficient for Latin scripts**. 
@@ -428,11 +425,6 @@ MIT
 ---
 
 ## Disclaimer
-
-This project is an independent open-source tool built on top of the Anthropic API. It is not affiliated with or endorsed by Anthropic.
-
-<div align="center"><sub>Built for structured AI agent workflows with verifiable execution.</sub></div>
-
 
 This project is an independent open-source tool built on top of the Anthropic API. It is not affiliated with or endorsed by Anthropic.
 
