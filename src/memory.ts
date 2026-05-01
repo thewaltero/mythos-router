@@ -1,3 +1,8 @@
+// ─────────────────────────────────────────────────────────────
+//  mythos-router :: memory.ts
+//  Self-Healing Memory — Authority-Based Derivative Indexing
+// ─────────────────────────────────────────────────────────────
+
 import { readFileSync, writeFileSync, existsSync, statSync, appendFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -240,13 +245,27 @@ export function appendMetadataBlock(metadata: Record<string, string>, dryRun = f
   }
 
   appendFileSync(path, block, 'utf-8');
+
+  // Update signpost so the next initMemory() doesn't think the index is out of sync
+  try {
+    const db = getDb();
+    const hash = getMemoryHash();
+    db.prepare('INSERT OR REPLACE INTO sync_cache (key, value) VALUES (?, ?)')
+      .run('manifest_hash', hash);
+  } catch {
+    // Ignore, derivative index is non-authoritative
+  }
 }
 
 /**
  * Surgical retrieval from the derivative SQLite index using FTS5.
  * Returns ranked results matching the query.
  */
-export function searchMemory(query: string): MemoryEntry[] {
+export function searchMemory(query: string, options?: { createIfMissing?: boolean }): MemoryEntry[] {
+  if (options?.createIfMissing === false) {
+    if (!existsSync(getDbPath())) return [];
+  }
+
   try {
     const db = getDb();
     // Use FTS5 ranked search
@@ -298,8 +317,14 @@ function parseMemoryFile(): MemoryEntry[] {
 
 // ── Read all entries ─────────────────────────────────────────
 export function readMemory(): { header: string; entries: MemoryEntry[]; raw: string } {
-  initMemory();
   const path = getMemoryPath();
+
+  // Do NOT call initMemory() here — reads must never create files.
+  // This ensures dry-run commands stay truly non-mutating.
+  if (!existsSync(path)) {
+    return { header: '', entries: [], raw: '' };
+  }
+
   const raw = readFileSync(path, 'utf-8');
   const lines = raw.split('\n');
 
