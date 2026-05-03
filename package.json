@@ -1,11 +1,11 @@
 {
   "name": "mythos-router",
-  "version": "1.5.3",
+  "version": "1.6.0",
   "description": "Capybara-tier CLI router — Claude Opus 4.7 with Adaptive Thinking, Strict Write Discipline, and Self-Healing Memory",
   "type": "module",
   "bin": {
-    "mythos": "./dist/cli.js",
-    "mythos-router": "./dist/cli.js"
+    "mythos": "dist/cli.js",
+    "mythos-router": "dist/cli.js"
   },
   "main": "./dist/index.js",
   "exports": {
@@ -21,13 +21,14 @@
   "scripts": {
     "dev": "tsx src/cli.ts",
     "build": "tsc",
-    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "test": "node scripts/run-tests.mjs",
     "prepublishOnly": "npm run build",
     "start": "node dist/cli.js",
     "chat": "tsx src/cli.ts chat",
     "verify": "tsx src/cli.ts verify",
     "dream": "tsx src/cli.ts dream",
     "stats": "tsx src/cli.ts stats",
+    "init": "tsx src/cli.ts init",
     "rebuild": "tsx -e \"import { rebuildIndex } from './src/memory.js'; rebuildIndex();\""
   },
   "keywords": [
