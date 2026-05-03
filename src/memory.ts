@@ -8,7 +8,7 @@ import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { getDatabaseSync } from './sqlite-loader.js';
 import { MEMORY_FILE, MEMORY_DB_FILE, MEMORY_MAX_LINES } from './config.js';
-import { timestamp, c, info, success, warn, dryRunBadge } from './utils.js';
+import { timestamp, c, info, success, warn, dryRunBadge, theme } from './utils.js';
 
 // ── Types ────────────────────────────────────────────────────
 export interface MemoryEntry {
@@ -227,11 +227,11 @@ export function appendEntry(action: string, result: string, dryRun = false): voi
 /**
  * Appends a hidden metadata block to MEMORY.md for machine parsing.
  */
-export function appendMetadataBlock(metadata: Record<string, string>, dryRun = false): void {
+export function appendMetadataBlock(metadata: Record<string, string>, type: string = 'meta', dryRun = false): void {
   initMemory(dryRun);
   const path = getMemoryPath();
   
-  let block = '\n<!-- mythos:meta\n';
+  let block = `\n<!-- mythos:${type}\n`;
   for (const [key, value] of Object.entries(metadata)) {
     block += `${key}=${value}\n`;
   }
@@ -413,15 +413,15 @@ export function getMemoryContext(maxChars = 4000): string {
 export function printMemoryStatus(): void {
   const path = getMemoryPath();
   if (!existsSync(path)) {
-    info(`No MEMORY.md found at ${c.dim}${path}${c.reset}`);
+    info(`No MEMORY.md found at ${theme.muted}${path}${c.reset}`);
     return;
   }
   const { entries, raw } = readMemory();
   const hasSummary = raw.includes('## 💤 Dream Summary');
   console.log(
-    `${c.dim}memory:${c.reset} ${c.cyan}${entries.length}${c.reset} entries` +
-    (hasSummary ? ` ${c.magenta}(has dream summary)${c.reset}` : '') +
-    (needsDream() ? ` ${c.yellow}(dream recommended)${c.reset}` : ''),
+    `${theme.muted}Memory:${c.reset} ${theme.info}${entries.length}${c.reset} entries` +
+    (hasSummary ? ` ${theme.muted}(has dream summary)${c.reset}` : '') +
+    (needsDream() ? ` ${theme.warning}(dream recommended)${c.reset}` : ''),
   );
 }
 

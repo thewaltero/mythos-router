@@ -3,21 +3,22 @@
 //  SWD Terminal Presentation Layer (separated from kernel)
 // ─────────────────────────────────────────────────────────────
 
-import { c, dryRunBadge, verboseBadge, confirmPrompt } from './utils.js';
+import { c, dryRunBadge, verboseBadge, confirmPrompt, theme, icon } from './utils.js';
 import { renderDiff } from './diff.js';
 import { parseActions, snapshotFile, type FileAction, type SWDRunResult } from './swd.js';
 
 // ── Print verification results to terminal ───────────────────
 export function printSWDResults(result: SWDRunResult): void {
   if (result.results.length === 0) return;
-  console.log(`\n${c.dim}── SWD Verification ──${c.reset}`);
+  console.log(`\n${theme.muted}── SWD Verification ──${c.reset}`);
   for (const v of result.results) {
-    const icon = ['verified', 'noop'].includes(v.status) ? c.green : c.red;
-    console.log(`  ${icon}•${c.reset} ${v.detail}`);
+    const isOk = ['verified', 'noop'].includes(v.status);
+    const statusIcon = isOk ? `${theme.success}${icon.success}` : `${theme.error}${icon.error}`;
+    console.log(`  ${statusIcon}${c.reset} ${v.detail}`);
   }
   if (result.rolledBack) {
-    console.log(`\n${c.bgYellow}${c.black}${c.bold} TRANSACTION ROLLBACK ${c.reset}`);
-    console.log(`  ${c.yellow}⟲${c.reset} All operations reverted due to failure.`);
+    console.log(`\n${theme.warning}${icon.rollback} TRANSACTION ROLLBACK${c.reset}`);
+    console.log(`  ${theme.muted}All operations reverted due to failure.${c.reset}`);
   }
 }
 

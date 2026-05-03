@@ -1,8 +1,9 @@
 import { readdirSync, statSync, readFileSync, existsSync } from 'node:fs';
 import { resolve, relative, join } from 'node:path';
-import { readMemory, initMemory, appendEntry, getMemoryPath } from '../memory.js';
+import { createHash } from 'node:crypto';
+import { readMemory, initMemory, appendEntry } from '../memory.js';
 import { DEFAULT_IGNORE_PATTERNS, MYTHOSIGNORE_FILE } from '../config.js';
-import { c, heading, success, warn, error, info, hr, timestamp, dryRunBadge } from '../utils.js';
+import { c, heading, success, warn, error, info, hr, dryRunBadge, theme } from '../utils.js';
 
 export async function verifyCommand(options: { dryRun?: boolean } = {}): Promise<void> {
   const dryRun = options.dryRun === true;
@@ -24,19 +25,20 @@ export async function verifyCommand(options: { dryRun?: boolean } = {}): Promise
   console.log(`${c.dim}  Memory has ${c.cyan}${entries.length}${c.dim} entries${c.reset}`);
   console.log();
 
-  const mentionedPaths = extractMentionedPaths(entries);
-  const { verified, drifted, missing } = verifyMentionedPaths(mentionedPaths, cwd, entries);
-  const untrackedFiles = getUntrackedFiles(files, mentionedPaths, cwd);
+  const fileMetadata = extractFileMetadata(raw, cwd);
+  const mentionedPaths = extractMentionedPaths(entries, cwd);
+  const { verified, drifted, missing } = verifyMentionedPaths(mentionedPaths, cwd, entries, fileMetadata);
+  const untrackedFiles = getUntrackedFiles(files, mentionedPaths);
 
   printUntrackedFiles(untrackedFiles, cwd);
 
   console.log(`\n${hr()}`);
   console.log(
     `${c.bold}Summary:${c.reset} ` +
-    `${c.green}${verified} verified${c.reset} · ` +
-    `${c.yellow}${drifted} drift${c.reset} · ` +
-    `${c.red}${missing} missing${c.reset} · ` +
-    `${c.dim}${untrackedFiles.length} untracked${c.reset}`,
+    `${theme.success}${verified} verified${c.reset} · ` +
+    `${theme.warning}${drifted} drifted${c.reset} · ` +
+    `${theme.error}${missing} missing${c.reset} · ` +
+    `${theme.muted}${untrackedFiles.length} untracked${c.reset}`,
   );
 
   appendEntry(
@@ -50,41 +52,92 @@ export async function verifyCommand(options: { dryRun?: boolean } = {}): Promise
       `\n${c.yellow}Drift detected. Run ${c.cyan}mythos chat${c.yellow} to reconcile.${c.reset}`,
     );
   } else {
-    console.log(`\n${c.green}✔ Zero drift. Memory and codebase are in sync.${c.reset}`);
+    console.log(`\n${c.green}✔ No missing or drifted memory file references found.${c.reset}`);
   }
 }
 
 
 type MemoryEntry = { action: string; result: string };
 
-function extractMentionedPaths(entries: MemoryEntry[]): Set<string> {
+function extractFileMetadata(raw: string, cwd: string): Map<string, Record<string, string>> {
+  const metaMap = new Map<string, Record<string, string>>();
+  const re = /<!-- mythos:file\n([\s\S]*?)-->/g;
+  for (const match of raw.matchAll(re)) {
+    const lines = match[1]?.trim().split('\n') || [];
+    const meta: Record<string, string> = {};
+    for (const line of lines) {
+      const [k, v] = line.split('=');
+      if (k && v) meta[k.trim()] = v.trim();
+    }
+    if (meta.path) {
+      const absPath = resolve(cwd, meta.path);
+      metaMap.set(absPath, meta);
+    }
+  }
+  return metaMap;
+}
+
+function extractMentionedPaths(entries: MemoryEntry[], cwd: string): Set<string> {
   const mentionedPaths = new Set<string>();
   const re = /(?:CREATE|MODIFY|DELETE|READ):\s*([^;|]+)(?:;|$)/gi;
 
   for (const entry of entries) {
     for (const match of entry.action.matchAll(re)) {
       const path = match[1]?.trim();
-      if (path) mentionedPaths.add(path);
+      if (path) mentionedPaths.add(resolve(cwd, path));
     }
   }
   return mentionedPaths;
 }
 
-function verifyMentionedPaths(mentionedPaths: Set<string>, cwd: string, entries: MemoryEntry[]) {
+function verifyMentionedPaths(mentionedPaths: Set<string>, cwd: string, entries: MemoryEntry[], fileMetadata: Map<string, Record<string, string>>) {
   let verified = 0;
   let drifted = 0;
   let missing = 0;
 
   if (mentionedPaths.size > 0) {
     console.log(`${c.bold}File References in Memory:${c.reset}\n`);
-    for (const rawPath of mentionedPaths) {
-      const absPath = resolve(cwd, rawPath);
+    for (const absPath of mentionedPaths) {
       const relPath = relative(cwd, absPath);
-      const lastEntry = entries.filter((e) => e.action.includes(rawPath)).pop();
+      const lastEntry = entries.filter((e) => {
+        const re = /(?:CREATE|MODIFY|DELETE|READ):\s*([^;|]+)(?:;|$)/gi;
+        for (const match of e.action.matchAll(re)) {
+          if (resolve(cwd, match[1]?.trim() || '') === absPath) return true;
+        }
+        return false;
+      }).pop();
+
+      // Extract the specific operation for this path
+      let lastOp = '';
+      if (lastEntry) {
+        const re = /(CREATE|MODIFY|DELETE|READ):\s*([^;|]+)(?:;|$)/gi;
+        for (const match of lastEntry.action.matchAll(re)) {
+          if (resolve(cwd, match[2]?.trim() || '') === absPath) {
+            lastOp = match[1]?.toUpperCase() || '';
+          }
+        }
+      }
+
+      const wasDelete = lastOp === 'DELETE';
+      const fileMeta = fileMetadata.get(absPath);
 
       if (existsSync(absPath)) {
         const stat = statSync(absPath);
-        if (lastEntry?.result.includes('✅')) {
+        
+        if (wasDelete || fileMeta?.exists === 'false') {
+          warn(`${relPath} — exists but memory says it was deleted`);
+          drifted++;
+        } else if (fileMeta?.sha256) {
+          const content = readFileSync(absPath);
+          const hash = createHash('sha256').update(content).digest('hex');
+          if (hash !== fileMeta.sha256) {
+            warn(`${relPath} — exists but content drift detected (hash mismatch)`);
+            drifted++;
+          } else {
+            success(`${relPath} — verified by sha256 (${formatSize(stat.size)})`);
+            verified++;
+          }
+        } else if (lastEntry?.result.includes('✅')) {
           success(`${relPath} — verified (${formatSize(stat.size)})`);
           verified++;
         } else {
@@ -92,7 +145,7 @@ function verifyMentionedPaths(mentionedPaths: Set<string>, cwd: string, entries:
           drifted++;
         }
       } else {
-        if (lastEntry?.action.includes('DELETE')) {
+        if (wasDelete || fileMeta?.exists === 'false') {
           success(`${relPath} — correctly deleted`);
           verified++;
         } else {
@@ -107,10 +160,9 @@ function verifyMentionedPaths(mentionedPaths: Set<string>, cwd: string, entries:
   return { verified, drifted, missing };
 }
 
-function getUntrackedFiles(files: string[], mentionedPaths: Set<string>, cwd: string): string[] {
+function getUntrackedFiles(files: string[], mentionedPaths: Set<string>): string[] {
   return files.filter((f) => {
-    const rel = relative(cwd, f);
-    return !mentionedPaths.has(rel) && !mentionedPaths.has(f);
+    return !mentionedPaths.has(f);
   });
 }
 

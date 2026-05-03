@@ -1,5 +1,5 @@
 import { loadSessionMetrics, SessionMetric } from '../metrics.js';
-import { c, hr, BANNER } from '../utils.js';
+import { c, hr, BANNER, theme } from '../utils.js';
 
 interface StatsOptions {
   days?: string;
@@ -7,7 +7,7 @@ interface StatsOptions {
 
 export async function statsCommand(options: StatsOptions): Promise<void> {
   const allMetrics = loadSessionMetrics();
-  
+
   if (allMetrics.length === 0) {
     console.log(BANNER);
     console.log(`  ${c.dim}No metrics found yet. Start chatting to log some metrics!${c.reset}`);
@@ -53,11 +53,11 @@ export async function statsCommand(options: StatsOptions): Promise<void> {
 
   // Overall Stats
   console.log(`${c.bold}Overall Usage${c.reset}`);
-  console.log(`  Total Sessions : ${metrics.length}`);
-  console.log(`  Total Turns    : ${totalTurns}`);
-  console.log(`  Input Tokens   : ${totalInputTokens.toLocaleString()}`);
-  console.log(`  Output Tokens  : ${totalOutputTokens.toLocaleString()}`);
-  console.log(`  Total Cost     : ${c.green}$${totalCost.toFixed(4)}${c.reset}`);
+  console.log(`  Total Sessions : ${theme.info}${metrics.length}${c.reset}`);
+  console.log(`  Total Turns    : ${theme.info}${totalTurns}${c.reset}`);
+  console.log(`  Input Tokens   : ${theme.info}${totalInputTokens.toLocaleString()}${c.reset}`);
+  console.log(`  Output Tokens  : ${theme.info}${totalOutputTokens.toLocaleString()}${c.reset}`);
+  console.log(`  Total Cost     : ${theme.warning}$${totalCost.toFixed(4)}${c.reset}`);
   console.log('');
 
   // Cost by Command
@@ -65,7 +65,7 @@ export async function statsCommand(options: StatsOptions): Promise<void> {
   const sortedCommands = Object.entries(costByCommand).sort((a, b) => b[1] - a[1]);
   for (const [cmd, cost] of sortedCommands) {
     const percentage = totalCost > 0 ? ((cost / totalCost) * 100).toFixed(1) : '0.0';
-    console.log(`  ${cmd.padEnd(14)} : ${c.green}$${cost.toFixed(4)}${c.reset} ${c.dim}(${percentage}%)${c.reset}`);
+    console.log(`  ${cmd.padEnd(14)} : ${theme.info}$${cost.toFixed(4)}${c.reset} ${theme.muted}(${percentage}%)${c.reset}`);
   }
   console.log('');
 
@@ -74,7 +74,7 @@ export async function statsCommand(options: StatsOptions): Promise<void> {
   const sortedProjects = Object.entries(costByProject).sort((a, b) => b[1] - a[1]);
   for (const [proj, cost] of sortedProjects) {
     const percentage = totalCost > 0 ? ((cost / totalCost) * 100).toFixed(1) : '0.0';
-    console.log(`  ${proj.padEnd(14)} : ${c.green}$${cost.toFixed(4)}${c.reset} ${c.dim}(${percentage}%)${c.reset}`);
+    console.log(`  ${proj.padEnd(14)} : ${theme.info}$${cost.toFixed(4)}${c.reset} ${theme.muted}(${percentage}%)${c.reset}`);
   }
   console.log(hr());
 }

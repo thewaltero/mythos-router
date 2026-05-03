@@ -329,13 +329,19 @@ export function parseActions(output: string): FileAction[] {
   const START_TAG = '[FILE_ACTION:';
   const END_TAG = '[/FILE_ACTION]';
 
+  const MAX_ACTION_BLOCK_CHARS = 250_000;
+
   while (true) {
     const startIdx = output.indexOf(START_TAG, cursor);
     if (startIdx === -1) break;
 
     const endIdx = output.indexOf(END_TAG, startIdx);
     if (endIdx === -1) {
-      cursor = startIdx + 1;
+      break;
+    }
+
+    if (endIdx - startIdx > MAX_ACTION_BLOCK_CHARS) {
+      cursor = endIdx + END_TAG.length;
       continue;
     }
 
@@ -373,7 +379,16 @@ export function parseActions(output: string): FileAction[] {
     }
 
     if (path && operation && description) {
-      if (path.trim() === '' || path.length > 500) continue;
+      if (
+        path.trim() === '' ||
+        path.length > 500 ||
+        path.includes('\0') ||
+        path.includes('..') ||
+        path.startsWith('/') ||
+        isAbsolute(path)
+      ) {
+        continue;
+      }
 
       const opUpper = operation.toUpperCase();
       if (!['CREATE', 'MODIFY', 'DELETE', 'READ'].includes(opUpper)) {

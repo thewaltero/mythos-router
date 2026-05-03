@@ -129,6 +129,9 @@ export class ResponseCache {
     // Tool Invocation Bypass — never cache responses with tool calls
     if (response.toolCalls.length > 0) return;
 
+    // SWD Mutation Bypass — never cache responses attempting to write files
+    if (response.text.includes('[FILE_ACTION:')) return;
+
     try {
       const db = this.ensureDb();
       const serialized = JSON.stringify(response);

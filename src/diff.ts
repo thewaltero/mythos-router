@@ -1,10 +1,20 @@
-import { c } from './utils.js';
+// ─────────────────────────────────────────────────────────────
+//  mythos-router :: diff.ts
+//  Minimal Myers' Diff Algorithm (Shortest Edit Script)
+//  Line-by-line comparison with professional ANSI rendering
+// ─────────────────────────────────────────────────────────────
+
+import { c, theme } from './utils.js';
 
 export interface DiffLine {
   op: 'add' | 'remove' | 'keep';
   val: string;
 }
 
+/**
+ * Shortest Edit Script (SES) using Myers' algorithm.
+ * O((N+M)D) time and space complexity.
+ */
 export function myersDiff(a: string[], b: string[]): DiffLine[] {
   const n = a.length;
   const m = b.length;
@@ -75,36 +85,84 @@ function backtrack(trace: number[][], a: string[], b: string[]): DiffLine[] {
   return diff;
 }
 
-
-export function renderDiff(oldText: string, newText: string): string {
+/**
+ * Renders a professional ANSI diff between two strings.
+ * Shows contextLines lines of context around changes,
+ * collapses large unchanged blocks with a separator.
+ */
+export function renderDiff(oldText: string, newText: string, contextLines = 3): string {
   if (oldText === newText) {
-    return `  ${c.dim}(No changes detected)${c.reset}`;
+    return `  ${theme.muted}(No changes detected)${c.reset}`;
   }
 
   const aLines = oldText.split('\n');
   const bLines = newText.split('\n');
   const diff = myersDiff(aLines, bLines);
 
+  // Find which diff indices are changes (add/remove)
+  const changeIndices = new Set<number>();
+  for (let i = 0; i < diff.length; i++) {
+    if (diff[i]!.op !== 'keep') changeIndices.add(i);
+  }
+
+  // Compute visible set: change lines + contextLines around them
+  const visible = new Set<number>();
+  for (const idx of changeIndices) {
+    for (let j = Math.max(0, idx - contextLines); j <= Math.min(diff.length - 1, idx + contextLines); j++) {
+      visible.add(j);
+    }
+  }
+
   let output = '';
   let lineA = 1;
   let lineB = 1;
+  let lastPrinted = -1;
+  let additions = 0;
+  let deletions = 0;
 
-  for (const item of diff) {
+  for (let i = 0; i < diff.length; i++) {
+    const item = diff[i]!;
+
+    if (!visible.has(i)) {
+      // Track line numbers for skipped lines
+      if (item.op === 'keep') { lineA++; lineB++; }
+      else if (item.op === 'add') { lineB++; additions++; }
+      else if (item.op === 'remove') { lineA++; deletions++; }
+      continue;
+    }
+
+    // Insert collapse separator when there's a gap
+    if (lastPrinted >= 0 && i - lastPrinted > 1) {
+      const skipped = i - lastPrinted - 1;
+      output += `  ${theme.muted}     ... ${skipped} unchanged lines ...${c.reset}\n`;
+    }
+    lastPrinted = i;
+
     switch (item.op) {
       case 'keep':
-        output += `  ${c.gray}${lineA.toString().padStart(3)} |   ${item.val}${c.reset}\n`;
+        output += `  ${c.gray}${lineA.toString().padStart(3)} \u2502   ${item.val}${c.reset}\n`;
         lineA++;
         lineB++;
         break;
       case 'add':
-        output += `  ${c.gray}    | ${c.green}+ ${c.bold}${item.val}${c.reset}\n`;
+        output += `  ${c.gray}    \u2502 ${theme.success}+ ${c.bold}${item.val}${c.reset}\n`;
         lineB++;
+        additions++;
         break;
       case 'remove':
-        output += `  ${c.gray}${lineA.toString().padStart(3)} | ${c.red}- ${c.bold}${item.val}${c.reset}\n`;
+        output += `  ${c.gray}${lineA.toString().padStart(3)} \u2502 ${theme.error}- ${c.bold}${item.val}${c.reset}\n`;
         lineA++;
+        deletions++;
         break;
     }
+  }
+
+  // Stats footer
+  const statsFragments: string[] = [];
+  if (additions > 0) statsFragments.push(`${theme.success}+${additions}${c.reset}`);
+  if (deletions > 0) statsFragments.push(`${theme.error}-${deletions}${c.reset}`);
+  if (statsFragments.length > 0) {
+    output += `\n  ${theme.muted}${statsFragments.join(', ')}${c.reset}`;
   }
 
   return output.trimEnd();

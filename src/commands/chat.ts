@@ -1,12 +1,12 @@
 import * as readline from 'node:readline';
 import * as path from 'node:path';
 import { formatTokenUsage, getOrchestrator, type Message, type MythosResponse } from '../client.js';
-import { SWDEngine, parseActions, summarizeActions, type SWDRunResult } from '../swd.js';
+import { SWDEngine, parseActions, summarizeActions, snapshotFile, resolveSafePath, type SWDRunResult } from '../swd.js';
 import { printSWDResults, dryRunSWD, printVerboseParse } from '../swd-cli.js';
 import { saveSessionMetric } from '../metrics.js';
-import { appendEntry, appendMetadataBlock, needsDream, getMemoryContext, printMemoryStatus } from '../memory.js';
+import { appendEntry, appendMetadataBlock, needsDream, getMemoryContext, printMemoryStatus, getEntryCount } from '../memory.js';
 import { type EffortLevel, MAX_CORRECTION_RETRIES, MODELS, CAPYBARA_SYSTEM_PROMPT, validateApiKey } from '../config.js';
-import { c, Spinner, BANNER, hr, heading, error as logError, warn as logWarn, success as logSuccess, runTestCommand } from '../utils.js';
+import { c, Spinner, BANNER, hr, error as logError, warn as logWarn, success as logSuccess, runTestCommand, renderSessionCard, renderBadgeRow, renderHelpScreen, renderExitSummary, theme, type SessionCardConfig, type ExitSummaryConfig } from '../utils.js';
 import { SessionBudget } from '../budget.js';
 import { buildSkillPrompt } from '../skills.js';
 import { isGitRepo, hasUncommittedChanges, getCurrentBranch, commitChanges, getLatestHash, createAndCheckoutBranch } from '../git.js';
@@ -307,6 +307,32 @@ class ChatSession {
 
     const status = finalResult.success ? '✅ verified' : `⚠️ ${finalResult.results.filter(r => r.status !== 'verified').length} issues`;
     appendEntry(summarizeActions(responseText, userInput), status, false);
+
+    // Append file metadata blocks for drift detection
+    if (!this.options.dryRun) {
+      for (const res of finalResult.results) {
+        if (res.status === 'verified' || res.status === 'noop') {
+          const op = res.action.operation;
+          if (op === 'READ') continue;
+          try {
+            const absPath = resolveSafePath(res.action.path);
+            const snap = snapshotFile(absPath);
+            const meta: Record<string, string> = {
+              op,
+              path: res.action.path,
+              exists: snap.exists ? 'true' : 'false'
+            };
+            if (snap.exists) {
+              meta.sha256 = snap.hash;
+              meta.size = snap.size.toString();
+            }
+            appendMetadataBlock(meta, 'file', false);
+          } catch (err: any) {
+            // Ignore path resolution errors for deleted files or weird paths
+          }
+        }
+      }
+    }
   }
 
   private async runCorrectionLoop(lastResult: SWDRunResult): Promise<SWDRunResult> {
@@ -508,7 +534,7 @@ class ChatSession {
       } catch (err: any) { logWarn(`Auto-commit failed: ${err.message}`); }
     }
     const metadata = { commit: commitHash, branch: sandboxBranch || (repo ? getCurrentBranch() : 'none'), timestamp_end: new Date().toISOString() };
-    appendMetadataBlock(metadata, this.options.dryRun || false);
+    appendMetadataBlock(metadata, 'meta', this.options.dryRun || false);
 
     const snap = this.budget.status();
     if (snap.totalTokens > 0) {
@@ -579,8 +605,6 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
   const session = new ChatSession(options, ui);
 
   ui.log(BANNER);
-  ui.log(heading(`CHAT SESSION :: ${MODELS.high.toUpperCase()}`));
-  if (options.dryRun) ui.log(`  ${c.bgYellow}${c.black}${c.bold} DRY-RUN MODE ACTIVE ${c.reset}\n`);
 
   // ── Resume previous session if requested ────────────────
   if (options.resume) {
@@ -604,7 +628,35 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
     process.exit(1);
   }
 
-  printMemoryStatus();
+  // ── Session Card ────────────────────────────────────────
+  const repo = isGitRepo();
+  const snap = session.budget.status();
+  const cardConfig: SessionCardConfig = {
+    provider: session.forceProvider ?? 'auto',
+    model: MODELS[options.effort ?? 'high'] || MODELS.high,
+    dryRun: options.dryRun === true,
+    budgetEnabled: options.budget !== false,
+    branch: sandboxBranch || (repo ? getCurrentBranch() : 'none'),
+    memoryEntries: getEntryCount(),
+    memoryActive: getEntryCount() > 0,
+    tokensUsed: snap.totalTokens,
+    maxTokens: snap.maxTokens,
+    turnsUsed: snap.turns,
+    maxTurns: snap.maxTurns,
+  };
+  ui.log(renderSessionCard(cardConfig));
+
+  // ── Badge Row ──────────────────────────────────────────
+  const badges = renderBadgeRow({
+    dryRun: options.dryRun,
+    verbose: options.verbose,
+    branch: sandboxBranch || undefined,
+    resume: options.resume,
+    noBudget: options.budget === false,
+  });
+  if (badges) ui.log(badges);
+
+  ui.log(`${theme.muted}  Type /help for commands. Press Ctrl+C to save and exit.${c.reset}`);
   ui.divider();
 
   const rl = readline.createInterface({
@@ -613,8 +665,12 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
     prompt: `${c.magenta}${c.bold}mythos > ${c.reset}`,
   });
 
+  // Track starting memory count for exit summary delta
+  const startMemoryEntries = getEntryCount();
+  const startTime = Date.now();
+
   let finalized = false;
-  const safeExit = async () => {
+  const safeExit = async (code = 0) => {
     if (finalized) return;
     finalized = true;
     try {
@@ -622,14 +678,31 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
     } catch (err: any) {
       logWarn(`Finalize failed: ${err.message}`);
     }
-    process.exit(0);
+
+    // ── Exit Summary ──────────────────────────────────────
+    const snap = session.budget.status();
+    const exitConfig: ExitSummaryConfig = {
+      duration: formatElapsedMs(Date.now() - startTime),
+      turns: snap.turns,
+      maxTurns: snap.maxTurns,
+      tokens: snap.totalTokens,
+      maxTokens: snap.maxTokens,
+      cost: snap.estimatedCostUSD,
+      memoryEntriesAdded: Math.max(0, getEntryCount() - startMemoryEntries),
+      saved: !options.dryRun && session.history.length > 0,
+    };
+    if (snap.totalTokens > 0) {
+      ui.log('\n' + renderExitSummary(exitConfig));
+    }
+
+    process.exit(code);
   };
 
-  process.on('SIGINT', () => safeExit());
-  process.on('SIGTERM', () => safeExit());
+  process.on('SIGINT', () => safeExit(0));
+  process.on('SIGTERM', () => safeExit(0));
   process.on('uncaughtException', async (err) => {
     logError(`Unexpected error: ${err.stack || err.message}`);
-    await safeExit();
+    await safeExit(1);
   });
 
   rl.prompt();
@@ -637,7 +710,65 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
   rl.on('line', async (line) => {
     const input = line.trim();
     if (!input) { rl.prompt(); return; }
-    if (['exit', 'quit', '/q'].includes(input.toLowerCase())) { rl.close(); return; }
+
+    const cmd = input.toLowerCase();
+
+    // ── Exit commands ───────────────────────────────────
+    if (['exit', 'quit', '/q'].includes(cmd)) { rl.close(); return; }
+
+    // ── Slash commands ──────────────────────────────────
+    if (cmd === '/help') {
+      ui.log('\n' + renderHelpScreen());
+      rl.prompt();
+      return;
+    }
+
+    if (cmd === '/status') {
+      const currentRepo = isGitRepo();
+      const currentSnap = session.budget.status();
+      const statusCard: SessionCardConfig = {
+        provider: session.forceProvider ?? 'auto',
+        model: MODELS[options.effort ?? 'high'] || MODELS.high,
+        dryRun: options.dryRun === true,
+        budgetEnabled: options.budget !== false,
+        branch: sandboxBranch || (currentRepo ? getCurrentBranch() : 'none'),
+        memoryEntries: getEntryCount(),
+        memoryActive: getEntryCount() > 0,
+        tokensUsed: currentSnap.totalTokens,
+        maxTokens: currentSnap.maxTokens,
+        turnsUsed: currentSnap.turns,
+        maxTurns: currentSnap.maxTurns,
+      };
+      ui.log('\n' + renderSessionCard(statusCard));
+      rl.prompt();
+      return;
+    }
+
+    if (cmd === '/budget') {
+      ui.log('\n' + session.budget.formatBar());
+      const warning = session.budget.formatWarning();
+      if (warning) ui.warn(warning);
+      rl.prompt();
+      return;
+    }
+
+    if (cmd === '/memory') {
+      printMemoryStatus();
+      rl.prompt();
+      return;
+    }
+
+    if (cmd.startsWith('/clear')) {
+      if (cmd === '/clear confirm') {
+        const prevLen = session.history.length;
+        session.history = [];
+        ui.success(`Cleared ${prevLen} messages from conversation history.`);
+      } else {
+        ui.warn(`To clear conversation history, type: ${c.cyan}/clear confirm${c.reset}`);
+      }
+      rl.prompt();
+      return;
+    }
 
     await session.processInput(input);
     ui.divider();
@@ -645,5 +776,17 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
   });
 
   rl.on('close', safeExit);
+}
+
+// ── Local Helpers ────────────────────────────────────────────
+function formatElapsedMs(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  if (minutes < 60) return `${minutes}m ${secs}s`;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return `${hours}h ${mins}m`;
 }
 

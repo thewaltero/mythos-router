@@ -10,7 +10,7 @@ import {
   COST_PER_INPUT_TOKEN,
   COST_PER_OUTPUT_TOKEN,
 } from './config.js';
-import { c, progressBar } from './utils.js';
+import { c, progressBar, theme } from './utils.js';
 
 // ── Types ────────────────────────────────────────────────────
 export interface BudgetConfig {
@@ -152,7 +152,7 @@ export class SessionBudget {
   // ── Format a visual budget bar for the terminal ──────────
   formatBar(width = 20): string {
     if (!this.enabled) {
-      return `${c.dim}budget: ${c.yellow}disabled${c.dim} (expert mode)${c.reset}`;
+      return `${theme.muted}Budget: ${theme.warning}disabled${theme.muted} (expert mode)${c.reset}`;
     }
 
     const snap = this.status();
@@ -168,18 +168,18 @@ export class SessionBudget {
     const tokBar = progressBar(tokPct, width);
     const turnBar = progressBar(turnPct, Math.floor(width / 2));
 
-    const tokColor = tokPct >= 90 ? c.red : tokPct >= this.config.warnAtPercent ? c.yellow : c.green;
-    const turnColor = turnPct >= 90 ? c.red : turnPct >= this.config.warnAtPercent ? c.yellow : c.green;
+    const tokColor = tokPct >= 90 ? theme.error : tokPct >= this.config.warnAtPercent ? theme.warning : theme.success;
+    const turnColor = turnPct >= 90 ? theme.error : turnPct >= this.config.warnAtPercent ? theme.warning : theme.success;
 
     const elapsed = formatElapsed(snap.elapsedMs);
 
     return (
-      `${c.dim}budget:${c.reset} ` +
+      `${theme.muted}Budget:${c.reset} ` +
       `${tokColor}${tokBar}${c.reset} ` +
-      `${tokColor}${snap.totalTokens.toLocaleString()}${c.dim}/${snap.maxTokens.toLocaleString()} tokens${c.reset} · ` +
+      `${tokColor}${snap.totalTokens.toLocaleString()}${theme.muted}/${snap.maxTokens.toLocaleString()} tokens${c.reset} · ` +
       `${turnColor}${turnBar}${c.reset} ` +
-      `${turnColor}${snap.turns}${c.dim}/${snap.maxTurns} turns${c.reset} · ` +
-      `${c.dim}~$${snap.estimatedCostUSD.toFixed(4)} · ${elapsed}${c.reset}`
+      `${turnColor}${snap.turns}${theme.muted}/${snap.maxTurns} turns${c.reset} · ` +
+      `${theme.muted}~$${snap.estimatedCostUSD.toFixed(4)} · ${elapsed}${c.reset}`
     );
   }
 

@@ -22,7 +22,7 @@ import {
   MAX_OUTPUT_TOKENS_SEND,
   type EffortLevel,
 } from './config.js';
-import { c } from './utils.js';
+import { c, theme } from './utils.js';
 
 // ── Re-export Message for backward compatibility ─────────────
 export type { Message } from './providers/types.js';
@@ -159,16 +159,16 @@ export async function sendMessage(
 export function formatTokenUsage(resp: MythosResponse): string {
   const total = resp.inputTokens + resp.outputTokens;
   const providerInfo = resp._orchestration
-    ? ` ${c.dim}via ${c.cyan}${resp._orchestration.providerId}${c.dim}/${resp._orchestration.modelId}${c.reset}`
+    ? ` ${theme.muted}via ${theme.info}${resp._orchestration.providerId}${theme.muted}/${resp._orchestration.modelId}${c.reset}`
     : '';
   const fallbackInfo = resp._orchestration?.fallbackTriggered
-    ? ` ${c.yellow}(fallback)${c.reset}`
+    ? ` ${theme.warning}(fallback)${c.reset}`
     : '';
 
   return (
-    `${c.dim}tokens: ${c.cyan}${resp.inputTokens.toLocaleString()}${c.dim} in · ` +
-    `${c.cyan}${resp.outputTokens.toLocaleString()}${c.dim} out · ` +
-    `${c.yellow}${total.toLocaleString()}${c.dim} total${c.reset}` +
+    `${theme.muted}Tokens: ${theme.info}${resp.inputTokens.toLocaleString()}${theme.muted} in · ` +
+    `${theme.info}${resp.outputTokens.toLocaleString()}${theme.muted} out · ` +
+    `${theme.warning}${total.toLocaleString()}${theme.muted} total${c.reset}` +
     providerInfo + fallbackInfo
   );
 }

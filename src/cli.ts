@@ -38,14 +38,15 @@ const pkg = JSON.parse(readFileSync(resolve(__dirname, '..', 'package.json'), 'u
 const program = new Command();
 
 // ── Restore cursor on any exit (spinner crash safety) ────────
+// IMPORTANT: Only use 'exit' and 'uncaughtExceptionMonitor' here.
+// - 'exit' fires on every process termination, guaranteed cursor restore.
+// - Adding a 'SIGINT' listener suppresses Node's default Ctrl+C exit,
+//   which breaks non-chat commands (e.g. providers --watch).
+// - 'uncaughtExceptionMonitor' observes crashes without preempting
+//   command-level shutdown (chat.ts has its own finalize/save logic).
 const restoreCursor = () => process.stdout.write('\x1b[?25h');
 process.on('exit', restoreCursor);
-process.on('SIGINT', () => { restoreCursor(); process.exit(0); });
-process.on('uncaughtException', (err) => {
-  restoreCursor();
-  console.error(err);
-  process.exit(1);
-});
+process.on('uncaughtExceptionMonitor', restoreCursor);
 
 program
   .name('mythos')
@@ -112,7 +113,7 @@ program
 // ── mythos verify ────────────────────────────────────────────
 program
   .command('verify')
-  .description('Scan codebase and sync with MEMORY.md for zero drift')
+  .description('Scan codebase and verify file existence against MEMORY.md')
   .option(
     '--dry-run',
     'Preview verification without writing to MEMORY.md',
