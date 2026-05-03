@@ -1,15 +1,58 @@
 import * as readline from 'node:readline';
 import * as path from 'node:path';
-import { formatTokenUsage, getOrchestrator, type Message, type MythosResponse } from '../client.js';
-import { SWDEngine, parseActions, summarizeActions, snapshotFile, resolveSafePath, type SWDRunResult } from '../swd.js';
+import { formatTokenUsage, getOrchestrator, type Message } from '../client.js';
+import {
+  SWDEngine,
+  parseActions,
+  summarizeActions,
+  snapshotFile,
+  resolveSafePath,
+  type SWDRunResult,
+} from '../swd.js';
 import { printSWDResults, dryRunSWD, printVerboseParse } from '../swd-cli.js';
 import { saveSessionMetric } from '../metrics.js';
-import { appendEntry, appendMetadataBlock, needsDream, getMemoryContext, printMemoryStatus, getEntryCount } from '../memory.js';
-import { type EffortLevel, MAX_CORRECTION_RETRIES, MODELS, CAPYBARA_SYSTEM_PROMPT, validateApiKey } from '../config.js';
-import { c, Spinner, BANNER, hr, error as logError, warn as logWarn, success as logSuccess, runTestCommand, renderSessionCard, renderBadgeRow, renderHelpScreen, renderExitSummary, theme, type SessionCardConfig, type ExitSummaryConfig } from '../utils.js';
+import {
+  appendEntry,
+  appendMetadataBlock,
+  needsDream,
+  getMemoryContext,
+  printMemoryStatus,
+  getEntryCount,
+} from '../memory.js';
+import {
+  type EffortLevel,
+  MAX_CORRECTION_RETRIES,
+  MODELS,
+  CAPYBARA_SYSTEM_PROMPT,
+  validateApiKey,
+} from '../config.js';
+import {
+  c,
+  Spinner,
+  BANNER,
+  hr,
+  error as logError,
+  warn as logWarn,
+  success as logSuccess,
+  runTestCommand,
+  renderSessionCard,
+  renderBadgeRow,
+  renderHelpScreen,
+  renderExitSummary,
+  theme,
+  type SessionCardConfig,
+  type ExitSummaryConfig,
+} from '../utils.js';
 import { SessionBudget } from '../budget.js';
 import { buildSkillPrompt } from '../skills.js';
-import { isGitRepo, hasUncommittedChanges, getCurrentBranch, commitChanges, getLatestHash, createAndCheckoutBranch } from '../git.js';
+import {
+  isGitRepo,
+  hasUncommittedChanges,
+  getCurrentBranch,
+  commitChanges,
+  getLatestHash,
+  createAndCheckoutBranch,
+} from '../git.js';
 import { saveSession, loadSession, formatResumeInfo } from '../session.js';
 
 // ── UI Abstraction ──────────────────────────────────────────
@@ -17,7 +60,7 @@ export interface ChatUI {
   startLoading(msg: string): void;
   updateLoading(msg: string): void;
   stopLoading(msg?: string): void;
-  write(text: string): void;   // Raw streaming output (no newline)
+  write(text: string): void;
   log(msg: string): void;
   warn(msg: string): void;
   error(msg: string): void;
@@ -31,26 +74,28 @@ class ChatSession {
   public budget: SessionBudget;
   public engine: SWDEngine;
   public options: ChatOptions;
-  public finalSystemPrompt: string = '';
+  public finalSystemPrompt = '';
   public maxOutputTokens?: number;
   public forceProvider?: string;
   public allowFallback?: boolean;
   public timeoutMs?: number;
   public requiresTools?: boolean;
+
   private ui: ChatUI;
 
   constructor(options: ChatOptions, ui: ChatUI) {
     this.options = options;
     this.ui = ui;
-    // Parse budget config
+
     const baseMaxTokens = parseInt(options.maxTokens ?? '500000', 10) || 500_000;
     const maxTurns = parseInt(options.maxTurns ?? '25', 10) || 25;
 
-    // Load Skills
     let budgetMultiplier = 1.0;
+
     try {
       const skills = typeof options.skill === 'string' ? [options.skill] : (options.skill || []);
       const skillResult = buildSkillPrompt(CAPYBARA_SYSTEM_PROMPT, skills);
+
       this.finalSystemPrompt = skillResult.prompt;
       this.maxOutputTokens = skillResult.maxOutputTokens;
       this.forceProvider = skillResult.forceProvider;
@@ -59,9 +104,11 @@ class ChatSession {
       budgetMultiplier = skillResult.budgetMultiplier;
 
       // requiresTools is parsed but no providers implement tool_calling yet.
-      // Warn and neutralize so the orchestrator doesn't reject all providers.
+      // Warn and neutralize so the orchestrator does not reject all providers.
       if (skillResult.requiresTools) {
-        this.ui.warn('Skill declares requires-tools, but tool calling is not yet implemented. This field is reserved for future use.');
+        this.ui.warn(
+          'Skill declares requires-tools, but tool calling is not yet implemented. This field is reserved for future use.',
+        );
         this.requiresTools = false;
       }
 
@@ -69,7 +116,9 @@ class ChatSession {
         this.ui.divider();
         this.ui.log(`${c.cyan}${c.bold}⚡ ACTIVE SKILLS${c.reset}`);
         for (const skill of skillResult.skills) {
-          this.ui.log(`  ${c.green}✔ ${skill.meta.name}${c.dim} (v${skill.meta.version}) - ${skill.meta.description}${c.reset}`);
+          this.ui.log(
+            `  ${c.green}✔ ${skill.meta.name}${c.dim} (v${skill.meta.version}) - ${skill.meta.description}${c.reset}`,
+          );
         }
         this.ui.divider();
       }
@@ -94,65 +143,73 @@ class ChatSession {
       onRollback: (p, s, e) => {
         if (s) this.ui.updateLoading(`Rolled back: ${p}`);
         else this.ui.updateLoading(`${c.red}Rollback failed${c.reset}: ${p} (${e})`);
-      }
+      },
     });
   }
 
-  public async initialize() {
+  public async initialize(): Promise<void> {
     const context = await getMemoryContext();
-    if (context) {
-      // Prepend context to the final system prompt (or inject as user message if skills modified it)
-      if (this.finalSystemPrompt) {
-        this.finalSystemPrompt = `[CONTEXT: RECENT MEMORY]\n${context}\n\n${this.finalSystemPrompt}`;
-      } else {
-        this.history.push({ role: 'user', content: `[CONTEXT: RECENT MEMORY]\n${context}` });
-        this.history.push({ role: 'assistant', content: "Acknowledged. I have restored context from memory." });
-      }
+
+    if (!context) return;
+
+    if (this.finalSystemPrompt) {
+      this.finalSystemPrompt = `[CONTEXT: RECENT MEMORY]\n${context}\n\n${this.finalSystemPrompt}`;
+    } else {
+      this.history.push({ role: 'user', content: `[CONTEXT: RECENT MEMORY]\n${context}` });
+      this.history.push({
+        role: 'assistant',
+        content: 'Acknowledged. I have restored context from memory.',
+      });
     }
   }
 
   public async setupSandbox(): Promise<string | null> {
     if (!this.options.branch) return null;
 
-    if (!isGitRepo()) throw new Error('Not a git repository. Cannot use --branch flag.');
-    if (hasUncommittedChanges()) throw new Error('Uncommitted changes detected. Please commit or stash before sandboxing.');
+    if (!isGitRepo()) {
+      throw new Error('Not a git repository. Cannot use --branch flag.');
+    }
+
+    if (hasUncommittedChanges()) {
+      throw new Error('Uncommitted changes detected. Please commit or stash before sandboxing.');
+    }
 
     const current = getCurrentBranch();
-    if (current.startsWith('mythos/')) throw new Error(`Already inside a mythos branch: ${current}. Nested sandboxing blocked.`);
+    if (current.startsWith('mythos/')) {
+      throw new Error(`Already inside a mythos branch: ${current}. Nested sandboxing blocked.`);
+    }
 
     const timestampStr = new Date().toISOString().replace(/[-T:]/g, '').slice(0, 12);
     const branchName = `mythos/${this.options.branch}-${timestampStr}`;
 
     logSuccess(`Creating sandbox branch: ${c.bold}${branchName}${c.reset}`);
     createAndCheckoutBranch(branchName);
+
     return branchName;
   }
 
   private async enforceContextWindowGuard(): Promise<void> {
     let historyLength = 0;
+
     for (const msg of this.history) {
       historyLength += msg.content.length;
     }
 
-    // 1. Token estimation with 1.2x safety multiplier
     const historyTokens = Math.ceil((historyLength / 4) * 1.2);
     const systemPromptTokens = Math.ceil(((this.finalSystemPrompt?.length ?? 0) / 4) * 1.2);
 
-    // 3. System prompt inclusion safety buffer
     const RESPONSE_BUFFER = 8192;
     const effectiveLimit = 150_000 - systemPromptTokens - RESPONSE_BUFFER;
 
-    // 2. Compression ceiling rule
     const MAX_MESSAGES = 120;
     const overTokenLimit = historyTokens > effectiveLimit;
     const overMessageLimit = this.history.length > MAX_MESSAGES;
 
     if (!overTokenLimit && !overMessageLimit) return;
 
-    // At least 60%, or more if needed to get under the message cap
     const messagesToCompress = Math.max(
       Math.floor(this.history.length * 0.6),
-      this.history.length - (MAX_MESSAGES - 1)
+      this.history.length - (MAX_MESSAGES - 1),
     );
 
     if (messagesToCompress < 2) return;
@@ -161,9 +218,14 @@ class ChatSession {
     const toKeep = this.history.slice(messagesToCompress);
 
     const reason = overMessageLimit ? `message cap (> ${MAX_MESSAGES})` : '150k token limit';
-    this.ui.warn(`\n${c.yellow}Context approaching ${reason}. Compressing oldest ${messagesToCompress} turns...${c.reset}`);
+    this.ui.warn(
+      `\n${c.yellow}Context approaching ${reason}. Compressing oldest ${messagesToCompress} turns...${c.reset}`,
+    );
 
-    const prompt = `Please summarize the following older conversation context into a dense, factual summary. Preserve all technical decisions, constraints, paths, and context needed to continue the work.\n\n<history>\n${JSON.stringify(toCompress, null, 2)}\n</history>`;
+    const prompt =
+      'Please summarize the following older conversation context into a dense, factual summary. ' +
+      'Preserve all technical decisions, constraints, paths, and context needed to continue the work.\n\n' +
+      `<history>\n${JSON.stringify(toCompress, null, 2)}\n</history>`;
 
     try {
       const orchestrator = getOrchestrator();
@@ -174,24 +236,75 @@ class ChatSession {
           effort: 'low',
           maxTokens: 4096,
           deterministic: !!this.forceProvider,
-          forceProvider: this.forceProvider
-        }
+          forceProvider: this.forceProvider,
+        },
       );
 
       this.budget.record(response.usage.inputTokens, response.usage.outputTokens);
 
       this.history = [
         { role: 'user', content: `[CONTEXT SUMMARY OF PREVIOUS TURNS]\n${response.text}` },
-        { role: 'assistant', content: 'Acknowledged. I have the compressed context and will continue from here.' },
-        ...toKeep
+        {
+          role: 'assistant',
+          content: 'Acknowledged. I have the compressed context and will continue from here.',
+        },
+        ...toKeep,
       ];
 
-      appendEntry('Context Compression', `Summarized ${messagesToCompress} turns to prevent context overflow.`, this.options.dryRun);
+      appendEntry(
+        'Context Compression',
+        `Summarized ${messagesToCompress} turns to prevent context overflow.`,
+        this.options.dryRun,
+      );
     } catch (err: any) {
-      this.ui.warn(`\n${c.red}Summarization failed (${err.message}). Falling back to hard truncation.${c.reset}`);
+      this.ui.warn(
+        `\n${c.red}Summarization failed (${err.message}). Falling back to hard truncation.${c.reset}`,
+      );
+
       this.history = toKeep;
-      appendEntry('Context Compression', `Hard truncation of ${messagesToCompress} turns due to summary failure.`, this.options.dryRun);
+
+      appendEntry(
+        'Context Compression',
+        `Hard truncation of ${messagesToCompress} turns due to summary failure.`,
+        this.options.dryRun,
+      );
     }
+  }
+
+  private async streamAssistantResponse(stopMessage = '\n') {
+    let streamStarted = false;
+    const orchestrator = getOrchestrator();
+
+    const response = await orchestrator.streamMessage(this.history, {
+      systemPrompt: this.finalSystemPrompt || '',
+      effort: this.options.effort as EffortLevel,
+      maxTokens: this.maxOutputTokens,
+      deterministic: !!this.forceProvider,
+      forceProvider: this.forceProvider,
+      allowFallback: this.allowFallback,
+      timeoutMs: this.timeoutMs,
+      requiresTools: this.requiresTools,
+      onThinkingDelta: () => {
+        // Keep spinner-only behavior for correction/test-healing turns.
+      },
+      onTextDelta: (delta) => {
+        if (!streamStarted) {
+          this.ui.stopLoading(stopMessage);
+          streamStarted = true;
+        }
+        this.ui.write(delta);
+      },
+    });
+
+    if (!streamStarted) {
+      this.ui.stopLoading(stopMessage);
+    }
+
+    this.ui.write('\n');
+    this.history.push({ role: 'assistant', content: response.text });
+    this.budget.record(response.usage.inputTokens, response.usage.outputTokens);
+
+    return response;
   }
 
   public async processInput(input: string): Promise<void> {
@@ -210,31 +323,32 @@ class ChatSession {
 
     try {
       const orchestrator = getOrchestrator();
-      const response = await orchestrator.streamMessage(
-        this.history,
-        {
-          systemPrompt: this.finalSystemPrompt || '',
-          effort: this.options.effort as EffortLevel,
-          maxTokens: this.maxOutputTokens,
-          deterministic: !!this.forceProvider,
-          forceProvider: this.forceProvider,
-          allowFallback: this.allowFallback,
-          timeoutMs: this.timeoutMs,
-          requiresTools: this.requiresTools,
-          onThinkingDelta: (delta) => {
-            thinkingTokens += Math.ceil(delta.length / 4);
-            this.ui.updateLoading(`Thinking... ${c.yellow}~${thinkingTokens} tokens${c.reset}`);
-            if (process.stdout.isTTY) process.stdout.write(c.dim + delta + c.reset);
-          },
-          onTextDelta: (delta) => {
-            if (!streamStarted) {
-              this.ui.stopLoading(`${c.green}✔${c.reset} ${c.dim}Reasoning complete${c.reset}\n`);
-              streamStarted = true;
-            }
-            if (process.stdout.isTTY) process.stdout.write(delta);
-          },
-        }
-      );
+      const response = await orchestrator.streamMessage(this.history, {
+        systemPrompt: this.finalSystemPrompt || '',
+        effort: this.options.effort as EffortLevel,
+        maxTokens: this.maxOutputTokens,
+        deterministic: !!this.forceProvider,
+        forceProvider: this.forceProvider,
+        allowFallback: this.allowFallback,
+        timeoutMs: this.timeoutMs,
+        requiresTools: this.requiresTools,
+        onThinkingDelta: (delta) => {
+          thinkingTokens += Math.ceil(delta.length / 4);
+          this.ui.updateLoading(`Thinking... ${c.yellow}~${thinkingTokens} tokens${c.reset}`);
+          if (process.stdout.isTTY) process.stdout.write(c.dim + delta + c.reset);
+        },
+        onTextDelta: (delta) => {
+          if (!streamStarted) {
+            this.ui.stopLoading(`${c.green}✔${c.reset} ${c.dim}Reasoning complete${c.reset}\n`);
+            streamStarted = true;
+          }
+          if (process.stdout.isTTY) process.stdout.write(delta);
+        },
+      });
+
+      if (!streamStarted) {
+        this.ui.stopLoading(`${c.green}✔${c.reset} ${c.dim}Reasoning complete${c.reset}\n`);
+      }
 
       this.ui.write('\n');
       this.history.push({ role: 'assistant', content: response.text });
@@ -244,24 +358,28 @@ class ChatSession {
 
       await this.handleSWD(response.text, input);
 
-      // formatTokenUsage takes MythosResponse, so we map it here
-      this.ui.log(`\n${formatTokenUsage({
-        thinking: response.thinking,
-        text: response.text,
-        inputTokens: response.usage.inputTokens,
-        outputTokens: response.usage.outputTokens,
-        _orchestration: {
-          ...response.metadata,
-          latencyMs: response.usage.latencyMs
-        },
-      })}`);
+      this.ui.log(
+        `\n${formatTokenUsage({
+          thinking: response.thinking,
+          text: response.text,
+          inputTokens: response.usage.inputTokens,
+          outputTokens: response.usage.outputTokens,
+          _orchestration: {
+            ...response.metadata,
+            latencyMs: response.usage.latencyMs,
+          },
+        })}`,
+      );
+
       this.ui.log(this.budget.formatBar());
 
       const warning = this.budget.formatWarning();
       if (warning) this.ui.warn(`\n${warning}`);
 
       if (needsDream()) {
-        this.ui.warn(`\n${c.yellow}💤 Memory approaching capacity. Run ${c.cyan}mythos dream${c.yellow} to compress.${c.reset}`);
+        this.ui.warn(
+          `\n${c.yellow}💤 Memory approaching capacity. Run ${c.cyan}mythos dream${c.yellow} to compress.${c.reset}`,
+        );
       }
     } catch (err: any) {
       this.ui.stopLoading();
@@ -272,6 +390,7 @@ class ChatSession {
 
   private async handleSWD(responseText: string, userInput: string): Promise<void> {
     const actions = parseActions(responseText);
+
     if (actions.length === 0) {
       appendEntry(`chat: ${userInput.slice(0, 80)}`, '✅ clear', this.options.dryRun);
       return;
@@ -279,58 +398,70 @@ class ChatSession {
 
     if (this.options.dryRun) {
       const dryResult = await dryRunSWD(actions);
+
       appendEntry(
         summarizeActions(responseText, userInput),
         `🛠️ dry-run: ${dryResult.accepted.length} accepted, ${dryResult.rejected.length} rejected`,
-        true
+        true,
       );
+
       return;
     }
 
     this.ui.startLoading('Verifying and applying changes...');
     const result = await this.engine.run(actions);
     this.ui.stopLoading();
+
     printSWDResults(result);
 
     let finalResult = result;
+
     if (!result.success) {
       finalResult = await this.runCorrectionLoop(result);
     }
 
     if (this.options.testCmd) {
-      if (this.options.dryRun) {
-        this.ui.warn('Skipping test execution in dry-run mode.');
-      } else {
-        await this.runTestHealingLoop(this.options.testCmd);
-      }
+      await this.runTestHealingLoop(this.options.testCmd);
     }
 
-    const status = finalResult.success ? '✅ verified' : `⚠️ ${finalResult.results.filter(r => r.status !== 'verified').length} issues`;
+    const issueCount = finalResult.results.filter((r) => r.status !== 'verified').length;
+    const status = finalResult.success ? '✅ verified' : `⚠️ ${issueCount} issues`;
+
     appendEntry(summarizeActions(responseText, userInput), status, false);
 
-    // Append file metadata blocks for drift detection
-    if (!this.options.dryRun) {
-      for (const res of finalResult.results) {
-        if (res.status === 'verified' || res.status === 'noop') {
-          const op = res.action.operation;
-          if (op === 'READ') continue;
-          try {
-            const absPath = resolveSafePath(res.action.path);
-            const snap = snapshotFile(absPath);
-            const meta: Record<string, string> = {
-              op,
-              path: res.action.path,
-              exists: snap.exists ? 'true' : 'false'
-            };
-            if (snap.exists) {
-              meta.sha256 = snap.hash;
-              meta.size = snap.size.toString();
-            }
-            appendMetadataBlock(meta, 'file', false);
-          } catch (err: any) {
-            // Ignore path resolution errors for deleted files or weird paths
-          }
+    if (finalResult.success) {
+      this.appendFileMetadata(finalResult);
+    }
+  }
+
+  private appendFileMetadata(result: SWDRunResult): void {
+    if (this.options.dryRun) return;
+
+    for (const res of result.results) {
+      if (!['verified', 'noop'].includes(res.status)) continue;
+
+      const op = res.action.operation;
+      if (op === 'READ') continue;
+
+      try {
+        const absPath = resolveSafePath(res.action.path);
+        const snap = snapshotFile(absPath);
+
+        const meta: Record<string, string> = {
+          op,
+          path: res.action.path,
+          exists: snap.exists ? 'true' : 'false',
+        };
+
+        if (snap.exists) {
+          meta.sha256 = snap.hash;
+          meta.size = snap.size.toString();
         }
+
+        appendMetadataBlock(meta, 'file', false);
+      } catch {
+        // Metadata is helpful for drift detection, but it should never break
+        // an otherwise successful SWD run.
       }
     }
   }
@@ -338,6 +469,7 @@ class ChatSession {
   private async runCorrectionLoop(lastResult: SWDRunResult): Promise<SWDRunResult> {
     for (let attempt = 1; attempt <= MAX_CORRECTION_RETRIES; attempt++) {
       const budgetCheck = this.budget.check();
+
       if (!budgetCheck.ok) {
         this.ui.warn('Correction aborted — budget exhausted.');
         return lastResult;
@@ -346,47 +478,25 @@ class ChatSession {
       this.ui.log(`\n${c.yellow}⟲ SWD Correction Turn ${attempt}/${MAX_CORRECTION_RETRIES}${c.reset}`);
 
       const failures = lastResult.results
-        .filter(r => ['failed', 'drift'].includes(r.status))
-        .map(r => `- [${r.status.toUpperCase()}] ${r.action.operation} ${r.action.path}: ${r.detail}`)
+        .filter((r) => ['failed', 'drift'].includes(r.status))
+        .map((r) => `- [${r.status.toUpperCase()}] ${r.action.operation} ${r.action.path}: ${r.detail}`)
         .join('\n');
 
-      const prompt = `[SWD CORRECTION TURN]\nFile actions failed verification:\n${failures}\n\nPlease correct your response. Attempts remaining: ${MAX_CORRECTION_RETRIES - (attempt - 1)}`;
+      const prompt =
+        `[SWD CORRECTION TURN]\n` +
+        `File actions failed verification:\n${failures}\n\n` +
+        `Please correct your response. Attempts remaining: ${MAX_CORRECTION_RETRIES - (attempt - 1)}`;
 
       this.history.push({ role: 'user', content: prompt });
       this.ui.startLoading(`Correction attempt ${attempt}...`);
 
-      let streamStarted = false;
       try {
-        const orchestrator = getOrchestrator();
-        const response = await orchestrator.streamMessage(
-          this.history,
-          {
-            systemPrompt: this.finalSystemPrompt || '',
-            effort: this.options.effort as EffortLevel,
-            maxTokens: this.maxOutputTokens,
-            deterministic: !!this.forceProvider,
-            forceProvider: this.forceProvider,
-            allowFallback: this.allowFallback,
-            timeoutMs: this.timeoutMs,
-            requiresTools: this.requiresTools,
-            onThinkingDelta: () => { }, // simple spinner
-            onTextDelta: (delta) => {
-              if (!streamStarted) {
-                this.ui.stopLoading('\n');
-                streamStarted = true;
-              }
-              this.ui.write(delta);
-            }
-          }
-        );
-
-        this.ui.write('\n');
-        this.history.push({ role: 'assistant', content: response.text });
-        this.budget.record(response.usage.inputTokens, response.usage.outputTokens);
+        const response = await this.streamAssistantResponse('\n');
 
         this.ui.startLoading('Verifying corrected actions...');
         const result = await this.engine.run(parseActions(response.text));
         this.ui.stopLoading();
+
         printSWDResults(result);
 
         if (result.success) {
@@ -398,6 +508,7 @@ class ChatSession {
           this.ui.error('Max corrections reached. Yielding to human.');
           return result;
         }
+
         lastResult = result;
       } catch (err: any) {
         this.ui.stopLoading();
@@ -405,6 +516,7 @@ class ChatSession {
         return lastResult;
       }
     }
+
     return lastResult;
   }
 
@@ -413,9 +525,9 @@ class ChatSession {
     let lastOutput = '';
     let lastFailureCount = Infinity;
 
-    // Targeted normalization for identical output detection
     const normalizeOutput = (str: string) =>
-      str.replace(/\d+\.?\d*ms/g, '')
+      str
+        .replace(/\d+\.?\d*ms/g, '')
         .replace(/\d+\.?\d*s/g, '')
         .trim();
 
@@ -430,28 +542,28 @@ class ChatSession {
 
       if (passed) {
         this.ui.stopLoading();
-        this.ui.success(`Tests passed!`);
+        this.ui.success('Tests passed!');
         return;
       }
 
       this.ui.stopLoading();
       this.ui.error(`Tests failed (Attempt ${attempt}/${maxRetries})`);
 
-      // 1. Precise Thrashing Guard
       if (attempt > 1 && normalizeOutput(output) === normalizeOutput(lastOutput)) {
         this.ui.warn('Test output is effectively unchanged from previous attempt. Stopping loop to prevent token drain.');
         return;
       }
+
       lastOutput = output;
 
-      // 2. Regression Detection
       const currentFailureCount = (output.match(/fail|error/gi) || []).length;
+
       if (attempt > 1 && currentFailureCount > lastFailureCount) {
         this.ui.warn(`Regression detected: Failure count increased (${lastFailureCount} → ${currentFailureCount}). Be cautious.`);
       }
+
       lastFailureCount = currentFailureCount;
 
-      // 3. Regex Issue Hinting
       let hint = '';
       if (/TypeError|ReferenceError/i.test(output)) {
         hint = 'Runtime error detected.';
@@ -461,51 +573,33 @@ class ChatSession {
 
       this.ui.log(`${c.dim}Analyzing failure and generating fix...${c.reset}`);
 
-      // 4. Structured Prompting
-      const prompt = `[TEST FAILURE]\n\nCommand:\n${cmd}\n\nSummary:\nThe test suite failed. Analyze the error output below and fix the code.\n${hint ? `Hint: ${hint}\n` : ''}\nError Output:\n\`\`\`text\n${output}\n\`\`\`\n\nInstructions:\n- Fix only what is necessary to make the test pass.\n- Do not rewrite unrelated files.\n- Keep fixes minimal and targeted.`;
+      const prompt =
+        `[TEST FAILURE]\n\n` +
+        `Command:\n${cmd}\n\n` +
+        `Summary:\nThe test suite failed. Analyze the error output below and fix the code.\n` +
+        `${hint ? `Hint: ${hint}\n` : ''}` +
+        `Error Output:\n\`\`\`text\n${output}\n\`\`\`\n\n` +
+        `Instructions:\n` +
+        `- Fix only what is necessary to make the test pass.\n` +
+        `- Do not rewrite unrelated files.\n` +
+        `- Keep fixes minimal and targeted.`;
 
       this.history.push({ role: 'user', content: prompt });
-      this.ui.startLoading(`Capybara is fixing tests...`);
+      this.ui.startLoading('Capybara is fixing tests...');
 
-      let streamStarted = false;
-      const orchestrator = getOrchestrator();
-      const response = await orchestrator.streamMessage(
-        this.history,
-        {
-          systemPrompt: this.finalSystemPrompt || '',
-          effort: this.options.effort as EffortLevel,
-          maxTokens: this.maxOutputTokens,
-          deterministic: !!this.forceProvider,
-          forceProvider: this.forceProvider,
-          allowFallback: this.allowFallback,
-          timeoutMs: this.timeoutMs,
-          requiresTools: this.requiresTools,
-          onThinkingDelta: () => { },
-          onTextDelta: (delta) => {
-            if (!streamStarted) {
-              this.ui.stopLoading('\n');
-              streamStarted = true;
-            }
-            this.ui.write(delta);
-          }
-        }
-      );
+      const response = await this.streamAssistantResponse('\n');
 
-      this.ui.write('\n');
-      this.history.push({ role: 'assistant', content: response.text });
-      this.budget.record(response.usage.inputTokens, response.usage.outputTokens);
-
-      // 5. No-Op Guard
       const actions = parseActions(response.text);
+
       if (actions.length === 0) {
         this.ui.warn('No actionable changes returned by the model. Stopping loop.');
         break;
       }
 
-      // 6. Execute Claude's fix via SWD
       this.ui.startLoading('Applying test fixes...');
       const fixResult = await this.engine.run(actions);
       this.ui.stopLoading();
+
       printSWDResults(fixResult);
 
       if (!fixResult.success) {
@@ -518,25 +612,34 @@ class ChatSession {
     this.ui.log(`\n${c.dim}--- Final Test Output ---${c.reset}\n${lastOutput}`);
   }
 
-
-  public async finalize(sandboxBranch: string | null) {
+  public async finalize(sandboxBranch: string | null): Promise<void> {
     let commitHash = 'none';
     const repo = isGitRepo();
+
     if (repo && !this.options.dryRun) {
       try {
         // Only auto-commit when running in a sandbox branch (--branch).
-        // Without --branch, committing would capture the user's unrelated
-        // uncommitted work under a generic "mythos: session end" message.
+        // Without --branch, committing would capture unrelated user work.
         if (sandboxBranch && hasUncommittedChanges()) {
           commitChanges('mythos: session end');
         }
+
         commitHash = getLatestHash();
-      } catch (err: any) { logWarn(`Auto-commit failed: ${err.message}`); }
+      } catch (err: any) {
+        logWarn(`Auto-commit failed: ${err.message}`);
+      }
     }
-    const metadata = { commit: commitHash, branch: sandboxBranch || (repo ? getCurrentBranch() : 'none'), timestamp_end: new Date().toISOString() };
+
+    const metadata = {
+      commit: commitHash,
+      branch: sandboxBranch || (repo ? getCurrentBranch() : 'none'),
+      timestamp_end: new Date().toISOString(),
+    };
+
     appendMetadataBlock(metadata, 'meta', this.options.dryRun || false);
 
     const snap = this.budget.status();
+
     if (snap.totalTokens > 0) {
       saveSessionMetric({
         command: 'chat',
@@ -550,14 +653,17 @@ class ChatSession {
       });
     }
 
-    // Persist session for --resume
     if (this.history.length > 0 && !this.options.dryRun) {
       try {
-        saveSession(this.history, {
-          inputTokens: snap.inputTokens,
-          outputTokens: snap.outputTokens,
-          turns: snap.turns,
-        }, path.basename(process.cwd()));
+        saveSession(
+          this.history,
+          {
+            inputTokens: snap.inputTokens,
+            outputTokens: snap.outputTokens,
+            turns: snap.turns,
+          },
+          path.basename(process.cwd()),
+        );
       } catch (err: any) {
         logWarn(`Session save failed: ${err.message}`);
       }
@@ -573,15 +679,41 @@ class TerminalUI implements ChatUI {
     this.spinner = spinner;
   }
 
-  startLoading(msg: string) { this.spinner.start(msg); }
-  updateLoading(msg: string) { this.spinner.update(msg); }
-  stopLoading(msg?: string) { this.spinner.stop(msg); }
-  write(text: string) { process.stdout.write(text); }
-  log(msg: string) { console.log(msg); }
-  warn(msg: string) { logWarn(msg); }
-  error(msg: string) { logError(msg); }
-  success(msg: string) { logSuccess(msg); }
-  divider() { console.log(hr()); }
+  startLoading(msg: string): void {
+    this.spinner.start(msg);
+  }
+
+  updateLoading(msg: string): void {
+    this.spinner.update(msg);
+  }
+
+  stopLoading(msg?: string): void {
+    this.spinner.stop(msg);
+  }
+
+  write(text: string): void {
+    process.stdout.write(text);
+  }
+
+  log(msg: string): void {
+    console.log(msg);
+  }
+
+  warn(msg: string): void {
+    logWarn(msg);
+  }
+
+  error(msg: string): void {
+    logError(msg);
+  }
+
+  success(msg: string): void {
+    logSuccess(msg);
+  }
+
+  divider(): void {
+    console.log(hr());
+  }
 }
 
 // ── Command Interface ────────────────────────────────────────
@@ -601,17 +733,17 @@ interface ChatOptions {
 
 export async function chatCommand(options: ChatOptions): Promise<void> {
   validateApiKey();
+
   const ui = new TerminalUI(new Spinner());
   const session = new ChatSession(options, ui);
 
   ui.log(BANNER);
 
-  // ── Resume previous session if requested ────────────────
   if (options.resume) {
     const saved = loadSession();
+
     if (saved) {
       session.history = saved.history;
-      // Re-record previous budget usage so the limiter is aware
       session.budget.restore(saved.budget.inputTokens, saved.budget.outputTokens, saved.budget.turns);
       ui.success(formatResumeInfo(saved));
     } else {
@@ -620,6 +752,7 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
   }
 
   let sandboxBranch: string | null = null;
+
   try {
     sandboxBranch = await session.setupSandbox();
     await session.initialize();
@@ -628,9 +761,9 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
     process.exit(1);
   }
 
-  // ── Session Card ────────────────────────────────────────
   const repo = isGitRepo();
   const snap = session.budget.status();
+
   const cardConfig: SessionCardConfig = {
     provider: session.forceProvider ?? 'auto',
     model: MODELS[options.effort ?? 'high'] || MODELS.high,
@@ -644,9 +777,9 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
     turnsUsed: snap.turns,
     maxTurns: snap.maxTurns,
   };
+
   ui.log(renderSessionCard(cardConfig));
 
-  // ── Badge Row ──────────────────────────────────────────
   const badges = renderBadgeRow({
     dryRun: options.dryRun,
     verbose: options.verbose,
@@ -654,6 +787,7 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
     resume: options.resume,
     noBudget: options.budget === false,
   });
+
   if (badges) ui.log(badges);
 
   ui.log(`${theme.muted}  Type /help for commands. Press Ctrl+C to save and exit.${c.reset}`);
@@ -665,33 +799,35 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
     prompt: `${c.magenta}${c.bold}mythos > ${c.reset}`,
   });
 
-  // Track starting memory count for exit summary delta
   const startMemoryEntries = getEntryCount();
   const startTime = Date.now();
 
   let finalized = false;
+
   const safeExit = async (code = 0) => {
     if (finalized) return;
     finalized = true;
+
     try {
       await session.finalize(sandboxBranch);
     } catch (err: any) {
       logWarn(`Finalize failed: ${err.message}`);
     }
 
-    // ── Exit Summary ──────────────────────────────────────
-    const snap = session.budget.status();
+    const currentSnap = session.budget.status();
+
     const exitConfig: ExitSummaryConfig = {
       duration: formatElapsedMs(Date.now() - startTime),
-      turns: snap.turns,
-      maxTurns: snap.maxTurns,
-      tokens: snap.totalTokens,
-      maxTokens: snap.maxTokens,
-      cost: snap.estimatedCostUSD,
+      turns: currentSnap.turns,
+      maxTurns: currentSnap.maxTurns,
+      tokens: currentSnap.totalTokens,
+      maxTokens: currentSnap.maxTokens,
+      cost: currentSnap.estimatedCostUSD,
       memoryEntriesAdded: Math.max(0, getEntryCount() - startMemoryEntries),
       saved: !options.dryRun && session.history.length > 0,
     };
-    if (snap.totalTokens > 0) {
+
+    if (currentSnap.totalTokens > 0) {
       ui.log('\n' + renderExitSummary(exitConfig));
     }
 
@@ -709,14 +845,19 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
 
   rl.on('line', async (line) => {
     const input = line.trim();
-    if (!input) { rl.prompt(); return; }
+
+    if (!input) {
+      rl.prompt();
+      return;
+    }
 
     const cmd = input.toLowerCase();
 
-    // ── Exit commands ───────────────────────────────────
-    if (['exit', 'quit', '/q'].includes(cmd)) { rl.close(); return; }
+    if (['exit', 'quit', '/q'].includes(cmd)) {
+      rl.close();
+      return;
+    }
 
-    // ── Slash commands ──────────────────────────────────
     if (cmd === '/help') {
       ui.log('\n' + renderHelpScreen());
       rl.prompt();
@@ -726,6 +867,7 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
     if (cmd === '/status') {
       const currentRepo = isGitRepo();
       const currentSnap = session.budget.status();
+
       const statusCard: SessionCardConfig = {
         provider: session.forceProvider ?? 'auto',
         model: MODELS[options.effort ?? 'high'] || MODELS.high,
@@ -739,6 +881,7 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
         turnsUsed: currentSnap.turns,
         maxTurns: currentSnap.maxTurns,
       };
+
       ui.log('\n' + renderSessionCard(statusCard));
       rl.prompt();
       return;
@@ -746,8 +889,10 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
 
     if (cmd === '/budget') {
       ui.log('\n' + session.budget.formatBar());
+
       const warning = session.budget.formatWarning();
       if (warning) ui.warn(warning);
+
       rl.prompt();
       return;
     }
@@ -766,6 +911,7 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
       } else {
         ui.warn(`To clear conversation history, type: ${c.cyan}/clear confirm${c.reset}`);
       }
+
       rl.prompt();
       return;
     }
@@ -781,12 +927,16 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
 // ── Local Helpers ────────────────────────────────────────────
 function formatElapsedMs(ms: number): string {
   const seconds = Math.floor(ms / 1000);
+
   if (seconds < 60) return `${seconds}s`;
+
   const minutes = Math.floor(seconds / 60);
   const secs = seconds % 60;
+
   if (minutes < 60) return `${minutes}m ${secs}s`;
+
   const hours = Math.floor(minutes / 60);
   const mins = minutes % 60;
+
   return `${hours}h ${mins}m`;
 }
-
