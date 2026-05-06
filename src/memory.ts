@@ -315,6 +315,47 @@ function parseMemoryFile(): MemoryEntry[] {
   return entries;
 }
 
+function getLatestFileMetadataBlocks(): string[] {
+  const path = getMemoryPath();
+  if (!existsSync(path)) return [];
+
+  const raw = readFileSync(path, 'utf-8');
+  const blockRe = /<!-- mythos:file\n([\s\S]*?)-->/g;
+  const byPath = new Map<string, string>();
+  const order: string[] = [];
+
+  for (const match of raw.matchAll(blockRe)) {
+    const body = match[1] ?? '';
+    const meta = parseMetadataBody(body);
+    const filePath = meta.path;
+
+    if (!filePath) continue;
+    if (!byPath.has(filePath)) order.push(filePath);
+
+    byPath.set(filePath, `<!-- mythos:file\n${body.trim()}\n-->`);
+  }
+
+  return order
+    .map((filePath) => byPath.get(filePath))
+    .filter((block): block is string => Boolean(block));
+}
+
+function parseMetadataBody(body: string): Record<string, string> {
+  const meta: Record<string, string> = {};
+
+  for (const line of body.trim().split('\n')) {
+    const eqIdx = line.indexOf('=');
+    if (eqIdx === -1) continue;
+
+    const key = line.slice(0, eqIdx).trim();
+    const value = line.slice(eqIdx + 1).trim();
+
+    if (key) meta[key] = value;
+  }
+
+  return meta;
+}
+
 // ── Read all entries ─────────────────────────────────────────
 export function readMemory(): { header: string; entries: MemoryEntry[]; raw: string } {
   const path = getMemoryPath();
@@ -378,6 +419,11 @@ export function writeCompressedMemory(
 
   for (const entry of recentEntries) {
     content += `| ${entry.timestamp} | ${entry.action} | ${entry.result} |\n`;
+  }
+
+  const preservedFileMetadata = getLatestFileMetadataBlocks();
+  if (preservedFileMetadata.length > 0) {
+    content += `\n${preservedFileMetadata.join('\n')}\n`;
   }
 
   if (dryRun) {
