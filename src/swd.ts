@@ -29,6 +29,8 @@ export interface ActionResult {
   action: FileAction;
   status: VerificationStatus;
   detail: string;
+  before?: FileSnapshotSummary;
+  after?: FileSnapshotSummary;
 }
 
 export interface SWDRunResult {
@@ -56,6 +58,14 @@ export interface FileSnapshot {
   mtime: number;
   hash: string;
   content: Buffer | null;
+}
+
+export interface FileSnapshotSummary {
+  path: string;
+  exists: boolean;
+  size: number;
+  mtime: number;
+  hash: string;
 }
 
 // ── SWD Engine ───────────────────────────────────────────────
@@ -183,37 +193,43 @@ export class SWDEngine {
     const before = ctx.getSnapshot(action.path, 'before');
     const after = ctx.getSnapshot(action.path, 'after');
     const changed = after.hash !== before.hash;
+    const result = (status: VerificationStatus, detail: string): ActionResult => ({
+      action,
+      status,
+      detail,
+      before: summarizeSnapshot(before),
+      after: summarizeSnapshot(after),
+    });
 
     switch (action.operation) {
       case 'CREATE':
-        if (!after.exists) return { action, status: 'failed', detail: `File was not created: ${action.path}` };
-        if (before.exists) return { action, status: 'drift', detail: `File already existed before CREATE: ${action.path}` };
+        if (!after.exists) return result('failed', `File was not created: ${action.path}`);
+        if (before.exists) return result('drift', `File already existed before CREATE: ${action.path}`);
         break;
       case 'MODIFY':
-        if (!after.exists) return { action, status: 'failed', detail: `File missing after MODIFY: ${action.path}` };
+        if (!after.exists) return result('failed', `File missing after MODIFY: ${action.path}`);
         break;
       case 'DELETE':
-        if (!before.exists) return { action, status: 'drift', detail: `DELETE on non-existent file: ${action.path}` };
-        if (after.exists) return { action, status: 'failed', detail: `File still exists after DELETE: ${action.path}` };
+        if (!before.exists) return result('drift', `DELETE on non-existent file: ${action.path}`);
+        if (after.exists) return result('failed', `File still exists after DELETE: ${action.path}`);
         break;
     }
 
     if (action.contentHash && after.hash !== action.contentHash) {
-      return { action, status: 'drift', detail: `Hash mismatch on ${action.path}: expected ${action.contentHash.slice(0, 12)}, got ${after.hash.slice(0, 12)}` };
+      return result('drift', `Hash mismatch on ${action.path}: expected ${action.contentHash.slice(0, 12)}, got ${after.hash.slice(0, 12)}`);
     }
 
     if (action.content !== undefined && ['CREATE', 'MODIFY'].includes(action.operation)) {
       const expectedHash = createHash('sha256').update(action.content).digest('hex');
       if (after.hash !== expectedHash) {
-        return { action, status: 'drift', detail: `Written content does not match intended content for ${action.path}` };
+        return result('drift', `Written content does not match intended content for ${action.path}`);
       }
     }
 
-    return {
-      action,
-      status: changed ? 'verified' : 'noop',
-      detail: changed ? `Verified: ${action.operation} ${action.path}` : `No-op: ${action.path} remains identical.`,
-    };
+    return result(
+      changed ? 'verified' : 'noop',
+      changed ? `Verified: ${action.operation} ${action.path}` : `No-op: ${action.path} remains identical.`,
+    );
   }
 
   private performRollback(ctx: InternalSessionContext): { anyRolledBack: boolean, errors: string[] } {
@@ -321,6 +337,16 @@ export function snapshotFile(safeAbsPath: string): FileSnapshot {
     }
     throw new Error(`Failed to snapshot file ${safeAbsPath}: ${err.message}`);
   }
+}
+
+function summarizeSnapshot(snapshot: FileSnapshot): FileSnapshotSummary {
+  return {
+    path: snapshot.path,
+    exists: snapshot.exists,
+    size: snapshot.size,
+    mtime: snapshot.mtime,
+    hash: snapshot.hash,
+  };
 }
 
 export function parseActions(output: string): FileAction[] {

@@ -38,6 +38,7 @@ export {
   type SWDRunResult,
   type SWDOptions,
   type FileSnapshot,
+  type FileSnapshotSummary,
 } from './swd.js';
 
 // Export the SWD CLI Presentation Layer
@@ -48,6 +49,29 @@ export { readMemory, writeCompressedMemory, initMemory, appendEntry, needsDream,
 
 // Export the Deterministic Cache
 export { ResponseCache, generateCacheKey, type CacheKeyInput } from './cache.js';
+
+// Export SWD Receipts
+export {
+  createSWDReceipt,
+  saveSWDReceipt,
+  listReceipts,
+  readReceipt,
+  verifyReceipt,
+  verifyReceiptIntegrity,
+  getReceiptsDir,
+  type SWDReceipt,
+  type SWDReceiptInput,
+  type ReceiptSummary,
+  type ReceiptProvider,
+  type ReceiptUsage,
+  type ReceiptBudget,
+  type ReceiptTestStatus,
+  type ReceiptTestResult,
+  type ReceiptFileResult,
+  type ReceiptSnapshot,
+  type ReceiptVerification,
+  type ReceiptFileVerification,
+} from './receipts.js';
 
 // Export the Budget Limiter
 export { SessionBudget, type BudgetConfig, type BudgetCheck, type BudgetSnapshot } from './budget.js';

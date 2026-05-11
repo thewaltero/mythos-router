@@ -25,6 +25,7 @@ import { dreamCommand } from './commands/dream.js';
 import { statsCommand } from './commands/stats.js';
 import { providersCommand } from './commands/providers.js';
 import { initCommand } from './commands/init.js';
+import { receiptsCommand } from './commands/receipts.js';
 import {
   DEFAULT_MAX_TOKENS_PER_SESSION,
   DEFAULT_MAX_TURNS,
@@ -44,7 +45,13 @@ const program = new Command();
 //   which breaks non-chat commands (e.g. providers --watch).
 // - 'uncaughtExceptionMonitor' observes crashes without preempting
 //   command-level shutdown (chat.ts has its own finalize/save logic).
-const restoreCursor = () => process.stdout.write('\x1b[?25h');
+const restoreCursor = () => {
+  if (process.stdout.isTTY) {
+    process.stdout.write('\x1b[?25h');
+  } else if (process.stderr.isTTY) {
+    process.stderr.write('\x1b[?25h');
+  }
+};
 process.on('exit', restoreCursor);
 process.on('uncaughtExceptionMonitor', restoreCursor);
 
@@ -145,6 +152,16 @@ program
   .option('-w, --watch', 'Auto-refresh the dashboard when metrics change')
   .option('--verbose', 'Show full error stacks for recent failures')
   .action(providersCommand);
+
+// SWD receipt inspection and drift verification
+program
+  .command('receipts')
+  .description('List, inspect, and verify SWD trust receipts')
+  .argument('[action]', 'list | show | verify | latest')
+  .argument('[target]', 'receipt id or latest')
+  .option('-n, --limit <n>', 'Number of receipts to show when listing', '10')
+  .option('--json', 'Print machine-readable JSON')
+  .action(receiptsCommand);
 
 // ── mythos init ──────────────────────────────────────────────
 program

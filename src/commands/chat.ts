@@ -11,6 +11,14 @@ import { SessionBudget } from '../budget.js';
 import { buildSkillPrompt } from '../skills.js';
 import { isGitRepo, hasUncommittedChanges, getCurrentBranch, commitChanges, getLatestHash, createAndCheckoutBranch } from '../git.js';
 import { saveSession, loadSession, formatResumeInfo } from '../session.js';
+import {
+  createSWDReceipt,
+  saveSWDReceipt,
+  type ReceiptProvider,
+  type ReceiptTestResult,
+  type ReceiptTestStatus,
+  type ReceiptUsage,
+} from '../receipts.js';
 
 // ── UI Abstraction ──────────────────────────────────────────
 export interface ChatUI {
@@ -242,7 +250,19 @@ class ChatSession {
 
       if (this.options.verbose) printVerboseParse(response.text);
 
-      await this.handleSWD(response.text, input);
+      await this.handleSWD(response.text, input, {
+        provider: {
+          providerId: response.metadata.providerId,
+          modelId: response.metadata.modelId,
+          fallbackTriggered: response.metadata.fallbackTriggered,
+          incomplete: response.metadata.incomplete,
+          latencyMs: response.usage.latencyMs,
+        },
+        usage: {
+          inputTokens: response.usage.inputTokens,
+          outputTokens: response.usage.outputTokens,
+        },
+      });
 
       // formatTokenUsage takes MythosResponse, so we map it here
       this.ui.log(`\n${formatTokenUsage({
@@ -270,7 +290,7 @@ class ChatSession {
     }
   }
 
-  private async handleSWD(responseText: string, userInput: string): Promise<void> {
+  private async handleSWD(responseText: string, userInput: string, receiptContext: ReceiptContext): Promise<void> {
     const actions = parseActions(responseText);
     if (actions.length === 0) {
       appendEntry(`chat: ${userInput.slice(0, 80)}`, '✅ clear', this.options.dryRun);
@@ -297,21 +317,59 @@ class ChatSession {
       finalResult = await this.runCorrectionLoop(result);
     }
 
+    let testResult: ReceiptTestResult | undefined;
     if (this.options.testCmd) {
-      if (this.options.dryRun) {
-        this.ui.warn('Skipping test execution in dry-run mode.');
+      if (!finalResult.success || finalResult.rolledBack) {
+        this.ui.warn('Skipping test execution because SWD did not finish cleanly.');
+        testResult = summarizeTestResult(this.options.testCmd, false, 0, 'skipped-swd-failed', '');
       } else {
-        await this.runTestHealingLoop(this.options.testCmd);
+        testResult = await this.runTestHealingLoop(this.options.testCmd);
       }
     }
 
     const status = finalResult.success ? '✅ verified' : `⚠️ ${finalResult.results.filter(r => r.status !== 'verified').length} issues`;
-    appendEntry(summarizeActions(responseText, userInput), status, false);
+    const summary = summarizeActions(responseText, userInput);
+    appendEntry(summary, status, false);
 
     // Append file metadata only after a fully successful, non-rolled-back SWD run.
     // This prevents stale hash metadata from being recorded after failed or rolled-back writes.
     if (finalResult.success && !finalResult.rolledBack) {
       this.appendFileMetadata(finalResult);
+    }
+
+    this.saveReceipt(userInput, summary, finalResult, receiptContext, testResult);
+  }
+
+  private saveReceipt(
+    userInput: string,
+    summary: string,
+    result: SWDRunResult,
+    receiptContext: ReceiptContext,
+    testResult?: ReceiptTestResult,
+  ): void {
+    if (this.options.dryRun) return;
+
+    try {
+      const snap = this.budget.status();
+      const receipt = createSWDReceipt({
+        request: userInput,
+        summary,
+        result,
+        provider: receiptContext.provider,
+        usage: receiptContext.usage,
+        budget: {
+          sessionInputTokens: snap.inputTokens,
+          sessionOutputTokens: snap.outputTokens,
+          sessionTotalTokens: snap.totalTokens,
+          sessionTurns: snap.turns,
+          estimatedCostUSD: snap.estimatedCostUSD,
+        },
+        test: testResult,
+      });
+      saveSWDReceipt(receipt, false);
+      this.ui.log(`${c.dim}Receipt: ${c.cyan}mythos receipts show ${receipt.id}${c.reset}`);
+    } catch (err: any) {
+      this.ui.warn(`Receipt save failed: ${err.message}`);
     }
   }
 
@@ -419,10 +477,11 @@ class ChatSession {
     return lastResult;
   }
 
-  private async runTestHealingLoop(cmd: string): Promise<void> {
+  private async runTestHealingLoop(cmd: string): Promise<ReceiptTestResult> {
     const maxRetries = parseInt(this.options.maxTestRetries || '3', 10);
     let lastOutput = '';
     let lastFailureCount = Infinity;
+    let attempts = 0;
 
     // Targeted normalization for identical output detection
     const normalizeOutput = (str: string) =>
@@ -433,16 +492,17 @@ class ChatSession {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       if (!this.budget.check().ok) {
         this.ui.warn('TDD loop aborted — budget exhausted.');
-        return;
+        return summarizeTestResult(cmd, false, attempts, 'budget-exhausted', lastOutput);
       }
 
       this.ui.startLoading(`Running tests: ${c.cyan}${cmd}${c.reset}...`);
       const { passed, output } = await runTestCommand(cmd);
+      attempts = attempt;
 
       if (passed) {
         this.ui.stopLoading();
         this.ui.success(`Tests passed!`);
-        return;
+        return summarizeTestResult(cmd, true, attempts, 'passed', output);
       }
 
       this.ui.stopLoading();
@@ -451,7 +511,7 @@ class ChatSession {
       // 1. Precise Thrashing Guard
       if (attempt > 1 && normalizeOutput(output) === normalizeOutput(lastOutput)) {
         this.ui.warn('Test output is effectively unchanged from previous attempt. Stopping loop to prevent token drain.');
-        return;
+        return summarizeTestResult(cmd, false, attempts, 'unchanged-output', output);
       }
       lastOutput = output;
 
@@ -510,7 +570,7 @@ class ChatSession {
       const actions = parseActions(response.text);
       if (actions.length === 0) {
         this.ui.warn('No actionable changes returned by the model. Stopping loop.');
-        break;
+        return summarizeTestResult(cmd, false, attempts, 'no-actions', lastOutput);
       }
 
       // 6. Execute Claude's fix via SWD
@@ -521,7 +581,7 @@ class ChatSession {
 
       if (!fixResult.success) {
         this.ui.error('SWD failed while attempting to fix tests. Yielding.');
-        break;
+        return summarizeTestResult(cmd, false, attempts, 'swd-failed', lastOutput);
       }
 
       this.appendFileMetadata(fixResult);
@@ -529,6 +589,7 @@ class ChatSession {
 
     this.ui.error(`Max test retries (${maxRetries}) reached. Yielding to human.`);
     this.ui.log(`\n${c.dim}--- Final Test Output ---${c.reset}\n${lastOutput}`);
+    return summarizeTestResult(cmd, false, attempts, 'max-retries', lastOutput);
   }
 
 
@@ -610,6 +671,11 @@ interface ChatOptions {
   maxTestRetries?: string;
   skill?: string | string[];
   resume?: boolean;
+}
+
+interface ReceiptContext {
+  provider?: ReceiptProvider;
+  usage?: Omit<ReceiptUsage, 'totalTokens'>;
 }
 
 export async function chatCommand(options: ChatOptions): Promise<void> {
@@ -801,4 +867,22 @@ function formatElapsedMs(ms: number): string {
   const hours = Math.floor(minutes / 60);
   const mins = minutes % 60;
   return `${hours}h ${mins}m`;
+}
+
+function summarizeTestResult(
+  command: string,
+  passed: boolean,
+  attempts: number,
+  status: ReceiptTestStatus,
+  output: string,
+): ReceiptTestResult {
+  const trimmed = output.trim();
+  const result: ReceiptTestResult = {
+    command,
+    passed,
+    attempts,
+    status,
+  };
+  if (trimmed) result.outputTail = trimmed.slice(-1000);
+  return result;
 }
