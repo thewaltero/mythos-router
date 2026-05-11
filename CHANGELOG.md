@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.7.0] — 2026-05-11
+
+### Added
+- **SWD Trust Receipts** — Added persistent receipts for SWD runs, recording verified file outcomes, request summaries, provider/model metadata, token usage, git context, test status, and an integrity hash for later audit.
+- **`mythos receipts` Command** — Added receipt listing, inspection, and drift verification through `mythos receipts`, `mythos receipts show <id|latest>`, and `mythos receipts verify <id|latest>`, with `--json` output for automation.
+
+### Fixed
+- **Machine-Readable JSON Output** — Terminal cursor restoration no longer contaminates redirected stdout, keeping `--json` output parseable in CI and shell pipelines.
+
+---
+
 ## [1.6.1] — 2026-05-06
 
 ### Fixed
@@ -247,6 +258,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Correction Turns** — max 2 retries before yielding to human.
 - **Dream/Verify Commands** — memory compression and drift detection.
 
+[1.7.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.7.0
 [1.6.1]: https://github.com/thewaltero/mythos-router/releases/tag/v1.6.1
 [1.6.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.6.0
 [1.5.3]: https://github.com/thewaltero/mythos-router/releases/tag/v1.5.3
