@@ -10,3 +10,6 @@ memory.db
 memory.db-journal
 memory.db-wal
 memory.db-shm
+
+# Local SWD trust receipts (may include prompts and provider metadata)
+.mythos/receipts/
