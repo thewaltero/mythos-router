@@ -364,6 +364,7 @@ class ChatSession {
           sessionTurns: snap.turns,
           estimatedCostUSD: snap.estimatedCostUSD,
         },
+        git: this.currentGitContext(),
         test: testResult,
       });
       saveSWDReceipt(receipt, false);
@@ -373,6 +374,19 @@ class ChatSession {
     }
   }
 
+  private currentGitContext(): { branch?: string; commit?: string } | undefined {
+    if (!isGitRepo()) return undefined;
+
+    const branch = getCurrentBranch();
+    const commit = getLatestHash();
+    const git: { branch?: string; commit?: string } = {};
+
+    if (branch && branch !== 'unknown') git.branch = branch;
+    if (commit && commit !== 'unknown') git.commit = commit;
+
+    return Object.keys(git).length > 0 ? git : undefined;
+  }
+  
   private appendFileMetadata(result: SWDRunResult): void {
     if (this.options.dryRun || !result.success || result.rolledBack) return;
 
