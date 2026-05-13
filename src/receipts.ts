@@ -13,6 +13,37 @@ import type { SWDRunResult } from './swd.js';
 
 export const RECEIPTS_DIR = '.mythos/receipts';
 
+
+export const RECEIPT_OUTPUT_TAIL_MAX_CHARS = 500;
+
+const SECRET_VALUE_PATTERNS: RegExp[] = [
+  /\bsk-ant-[A-Za-z0-9_-]{16,}\b/g,
+  /\bsk-proj-[A-Za-z0-9_-]{16,}\b/g,
+  /\bsk-[A-Za-z0-9_-]{20,}\b/g,
+  /\bghp_[A-Za-z0-9_]{20,}\b/g,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
+  /\bxox[abprs]-[A-Za-z0-9-]{20,}\b/g,
+  /\bBearer\s+[A-Za-z0-9._-]{20,}\b/gi,
+];
+
+const SECRET_ASSIGNMENT_PATTERN = /\b([A-Z][A-Z0-9_]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD)\s*=\s*)(["']?)([^\s"'`]+)(\2)/gi;
+
+export function redactReceiptSecrets(text: string): string {
+  let redacted = text;
+  for (const pattern of SECRET_VALUE_PATTERNS) {
+    redacted = redacted.replace(pattern, '[REDACTED_SECRET]');
+  }
+  return redacted.replace(SECRET_ASSIGNMENT_PATTERN, (_match, prefix: string, quote: string, _value: string, closingQuote: string) => {
+    return `${prefix}${quote}[REDACTED_SECRET]${closingQuote}`;
+  });
+}
+
+export function sanitizeReceiptOutputTail(output: string): string {
+  const trimmed = output.trim();
+  if (!trimmed) return '';
+  return redactReceiptSecrets(trimmed.slice(-RECEIPT_OUTPUT_TAIL_MAX_CHARS));
+}
+
 export interface ReceiptProvider {
   providerId: string;
   modelId: string;

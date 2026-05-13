@@ -18,6 +18,7 @@ import {
   type ReceiptTestResult,
   type ReceiptTestStatus,
   type ReceiptUsage,
+  sanitizeReceiptOutputTail,
 } from '../receipts.js';
 
 // ── UI Abstraction ──────────────────────────────────────────
@@ -44,6 +45,13 @@ function getReceiptGitContext(): { branch?: string; commit?: string } | undefine
   };
 
   return Object.keys(git).length > 0 ? git : undefined;
+}
+
+
+function warnIfMalformedFileActionOutput(output: string, parsedActionCount: number, ui: ChatUI): void {
+  if (parsedActionCount === 0 && output.includes('[FILE_ACTION:')) {
+    ui.warn('Model attempted FILE_ACTION output, but no valid actions were parsed.');
+  }
 }
 
 // ── Chat Session Manager ─────────────────────────────────────
@@ -305,6 +313,7 @@ class ChatSession {
 
   private async handleSWD(responseText: string, userInput: string, receiptContext: ReceiptContext): Promise<void> {
     const actions = parseActions(responseText);
+    warnIfMalformedFileActionOutput(responseText, actions.length, this.ui);
     if (actions.length === 0) {
       appendEntry(`chat: ${userInput.slice(0, 80)}`, '✅ clear', this.options.dryRun);
       return;
@@ -468,7 +477,9 @@ class ChatSession {
         this.budget.record(response.usage.inputTokens, response.usage.outputTokens);
 
         this.ui.startLoading('Verifying corrected actions...');
-        const result = await this.engine.run(parseActions(response.text));
+        const correctionActions = parseActions(response.text);
+        warnIfMalformedFileActionOutput(response.text, correctionActions.length, this.ui);
+        const result = await this.engine.run(correctionActions);
         this.ui.stopLoading();
         printSWDResults(result);
 
@@ -582,6 +593,7 @@ class ChatSession {
 
       // 5. No-Op Guard
       const actions = parseActions(response.text);
+      warnIfMalformedFileActionOutput(response.text, actions.length, this.ui);
       if (actions.length === 0) {
         this.ui.warn('No actionable changes returned by the model. Stopping loop.');
         return summarizeTestResult(cmd, false, attempts, 'no-actions', lastOutput);
@@ -897,6 +909,6 @@ function summarizeTestResult(
     attempts,
     status,
   };
-  if (trimmed) result.outputTail = trimmed.slice(-1000);
+  if (trimmed) result.outputTail = sanitizeReceiptOutputTail(trimmed);
   return result;
 }

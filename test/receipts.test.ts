@@ -11,6 +11,8 @@ import {
   saveSWDReceipt,
   verifyReceipt,
   verifyReceiptIntegrity,
+  sanitizeReceiptOutputTail,
+  RECEIPT_OUTPUT_TAIL_MAX_CHARS,
 } from '../src/receipts.js';
 import type { SWDRunResult } from '../src/swd.js';
 
@@ -209,6 +211,22 @@ describe('SWD receipts', () => {
     assert.equal(verification.ok, false);
     assert.equal(verification.files[0]!.status, 'drifted');
   });
+
+  it('sanitizes receipt test output tails before storage', () => {
+    const longPrefix = 'a'.repeat(RECEIPT_OUTPUT_TAIL_MAX_CHARS + 25);
+    const output = `${longPrefix}
+OPENAI_API_KEY=sk-proj-${'x'.repeat(32)}
+Authorization: Bearer ${'y'.repeat(40)}
+`;
+
+    const tail = sanitizeReceiptOutputTail(output);
+
+    assert.ok(tail.length <= RECEIPT_OUTPUT_TAIL_MAX_CHARS + '[REDACTED_SECRET]'.length * 2);
+    assert.doesNotMatch(tail, /sk-proj-/);
+    assert.doesNotMatch(tail, /Bearer y/);
+    assert.match(tail, /\[REDACTED_SECRET\]/);
+  });
+
 });
 
 function sha256(text: string): string {

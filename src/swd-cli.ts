@@ -12,8 +12,13 @@ export function printSWDResults(result: SWDRunResult): void {
   if (result.results.length === 0) return;
   console.log(`\n${theme.muted}── SWD Verification ──${c.reset}`);
   for (const v of result.results) {
+    const isDryRunPlan = v.detail.startsWith('Dry-run: planned ');
     const isOk = ['verified', 'noop'].includes(v.status);
-    const statusIcon = isOk ? `${theme.success}${icon.success}` : `${theme.error}${icon.error}`;
+    const statusIcon = isDryRunPlan
+      ? `${theme.muted}${icon.thinking}`
+      : isOk
+        ? `${theme.success}${icon.success}`
+        : `${theme.error}${icon.error}`;
     console.log(`  ${statusIcon}${c.reset} ${v.detail}`);
   }
   if (result.rolledBack) {

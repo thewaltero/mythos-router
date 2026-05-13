@@ -7,6 +7,7 @@ import {
   resolveSafePath,
   snapshotFile,
   SWDEngine,
+  MAX_WRITABLE_ACTION_CONTENT_BYTES,
   type FileAction,
 } from '../src/swd.js';
 
@@ -142,7 +143,7 @@ describe('SWDEngine (Production v1 API)', () => {
     rmSync(testDir, { recursive: true, force: true });
   });
 
-  it('Dry-run mode: Does NOT modify disk', async () => {
+  it('Dry-run mode: Does NOT modify disk and labels writes as planned', async () => {
     mkdirSync(testDir, { recursive: true });
     const fileA = join(testDir, 'dryrun.txt');
     const engine = new SWDEngine({ dryRun: true });
@@ -156,7 +157,39 @@ describe('SWDEngine (Production v1 API)', () => {
     }]);
 
     assert.strictEqual(result.success, true);
+    assert.strictEqual(result.results[0]?.detail, `Dry-run: planned CREATE ${fileA} (not applied)`);
     assert.strictEqual(existsSync(fileA), false);
+
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('Hardening: Blocks oversized full-file writes before touching disk', async () => {
+    mkdirSync(testDir, { recursive: true });
+    const safeFile = join(testDir, 'safe-before-large.txt');
+    const largeFile = join(testDir, 'large-write.txt');
+    const engine = new SWDEngine();
+
+    const result = await engine.run([
+      {
+        path: safeFile,
+        operation: 'CREATE',
+        intent: 'MUTATE',
+        content: 'this should not be written when a later action is oversized',
+        description: 'safe action that must be preflight-blocked'
+      },
+      {
+        path: largeFile,
+        operation: 'CREATE',
+        intent: 'MUTATE',
+        content: 'x'.repeat(MAX_WRITABLE_ACTION_CONTENT_BYTES + 1),
+        description: 'oversized write'
+      }
+    ]);
+
+    assert.strictEqual(result.success, false);
+    assert.match(result.errors[0] ?? '', /Large full-file writes are blocked/);
+    assert.strictEqual(existsSync(safeFile), false);
+    assert.strictEqual(existsSync(largeFile), false);
 
     rmSync(testDir, { recursive: true, force: true });
   });

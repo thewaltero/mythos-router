@@ -68,6 +68,18 @@ export interface FileSnapshotSummary {
   hash: string;
 }
 
+
+export const MAX_WRITABLE_ACTION_CONTENT_BYTES = 200_000;
+
+function getWritableActionContentBytes(action: FileAction): number {
+  if (!['CREATE', 'MODIFY'].includes(action.operation) || action.content === undefined) return 0;
+  return Buffer.byteLength(action.content, 'utf8');
+}
+
+function largeWriteBlockedMessage(action: FileAction, bytes: number): string {
+  return `Large full-file writes are blocked for ${action.path}: ${bytes} bytes exceeds ${MAX_WRITABLE_ACTION_CONTENT_BYTES}. Split the change into smaller edits.`;
+}
+
 // ── SWD Engine ───────────────────────────────────────────────
 /**
  * Authoritative filesystem execution kernel.
@@ -90,6 +102,25 @@ export class SWDEngine {
   public async run(actions: FileAction[]): Promise<SWDRunResult> {
     if (actions.length === 0) {
       return { success: true, results: [], rolledBack: false, rollbackErrors: [], errors: [] };
+    }
+
+    const largeWriteFailures = actions
+      .map(action => ({ action, bytes: getWritableActionContentBytes(action) }))
+      .filter(({ bytes }) => bytes > MAX_WRITABLE_ACTION_CONTENT_BYTES)
+      .map(({ action, bytes }) => ({
+        action,
+        status: 'failed' as VerificationStatus,
+        detail: largeWriteBlockedMessage(action, bytes),
+      }));
+
+    if (largeWriteFailures.length > 0) {
+      return {
+        success: false,
+        results: largeWriteFailures,
+        rolledBack: false,
+        rollbackErrors: [],
+        errors: largeWriteFailures.map(r => r.detail),
+      };
     }
 
     const context = new InternalSessionContext();
@@ -119,7 +150,7 @@ export class SWDEngine {
           const res: ActionResult = {
             action,
             status: 'verified',
-            detail: `Dry-run: ${action.operation} ${action.path} (not applied)`
+            detail: `Dry-run: planned ${action.operation} ${action.path} (not applied)`
           };
           results.push(res);
           this.options.onVerify(res);
