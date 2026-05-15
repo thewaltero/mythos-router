@@ -261,7 +261,7 @@ function normalizeFileResult(rootDir: string, result: SWDRunResult['results'][nu
     operation: result.action.operation,
     intent: result.action.intent,
     status: result.status,
-    detail: result.detail,
+    detail: redactReceiptSecrets(result.detail),
     before: normalizeSnapshot(rootDir, result.before),
     after: normalizeSnapshot(rootDir, result.after),
     expectedSource: 'none',
@@ -313,19 +313,21 @@ export function createSWDReceipt(input: SWDReceiptInput): SWDReceipt {
   const rootDir = getCurrentRoot();
   const timestamp = new Date().toISOString();
   const files = input.result.results.map((result) => normalizeFileResult(rootDir, result));
+  const safeRequest = redactReceiptSecrets(input.request);
+  const safeSummary = redactReceiptSecrets(input.summary);
   const base: Omit<SWDReceipt, 'integrity'> = {
-    id: createReceiptId(timestamp, input.request, files),
+    id: createReceiptId(timestamp, safeRequest, files),
     version: 1,
     timestamp,
-    request: input.request,
-    summary: input.summary,
+    request: safeRequest,
+    summary: safeSummary,
     fileCount: files.length,
     files,
     swd: {
       success: input.result.success,
       rolledBack: input.result.rolledBack,
-      errors: input.result.errors,
-      rollbackErrors: input.result.rollbackErrors,
+      errors: input.result.errors.map(redactReceiptSecrets),
+      rollbackErrors: input.result.rollbackErrors.map(redactReceiptSecrets),
     },
   };
 

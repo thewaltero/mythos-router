@@ -86,15 +86,30 @@ export function createAndCheckoutBranch(name: string): void {
   }
 }
 
+function normalizeGitPath(filePath: string): string {
+  const normalized = filePath.replace(/\\/g, '/').replace(/^\.\//, '');
+  if (!normalized || normalized.startsWith('../') || normalized.includes('/../') || normalized.startsWith('/')) {
+    throw new Error(`Unsafe git path: ${filePath}`);
+  }
+  return normalized;
+}
+
 /**
- * Commits all changes in the working tree.
- * Runs 'git add -A' and 'git commit -m <message>'.
- * Validates commit message before execution.
+ * Commits changes in the working tree.
+ *
+ * When paths are provided, only those paths are staged. This avoids capturing
+ * unrelated user work during Mythos sandbox auto-commits. If no paths are
+ * provided, falls back to the legacy full-tree behavior.
  */
-export function commitChanges(message: string): void {
+export function commitChanges(message: string, paths?: string[]): void {
   validateCommitMessage(message);
   try {
-    execFileSync('git', ['add', '-A'], { stdio: 'ignore' });
+    if (paths && paths.length > 0) {
+      const uniquePaths = Array.from(new Set(paths.map(normalizeGitPath)));
+      execFileSync('git', ['add', '--', ...uniquePaths], { stdio: 'ignore' });
+    } else {
+      execFileSync('git', ['add', '-A'], { stdio: 'ignore' });
+    }
     execFileSync('git', ['commit', '-m', message], { stdio: 'ignore' });
   } catch (err: any) {
     throw new Error(`Git commit failed: ${err.message}`);

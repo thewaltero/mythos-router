@@ -341,16 +341,26 @@ export function renderExitSummary(cfg: ExitSummaryConfig): string {
 // ── Interactive Y/n Confirm Prompt ───────────────────────────
 import * as readline from 'node:readline';
 
-export function confirmPrompt(message: string): Promise<boolean> {
+export function confirmPrompt(message: string, defaultValue = true): Promise<boolean> {
   return new Promise((resolve) => {
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      resolve(defaultValue);
+      return;
+    }
+
     const rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
     });
-    rl.question(`${message} ${c.dim}[Y/n]${c.reset} `, (answer) => {
+    const suffix = defaultValue ? '[Y/n]' : '[y/N]';
+    rl.question(`${message} ${c.dim}${suffix}${c.reset} `, (answer) => {
       rl.close();
       const trimmed = answer.trim().toLowerCase();
-      resolve(trimmed === '' || trimmed === 'y' || trimmed === 'yes');
+      if (trimmed === '') {
+        resolve(defaultValue);
+        return;
+      }
+      resolve(trimmed === 'y' || trimmed === 'yes');
     });
   });
 }

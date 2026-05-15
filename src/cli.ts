@@ -100,7 +100,7 @@ program
   )
   .option(
     '-t, --test-cmd <cmd>',
-    'Command to run after successful SWD execution (WARNING: assumes a trusted environment and executes arbitrary shell commands)',
+    'Command to run after successful SWD execution (prompts before running if model changed command-affecting files)',
   )
   .option(
     '--max-test-retries <n>',
