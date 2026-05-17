@@ -26,6 +26,22 @@ All file operations are verified against the actual filesystem before being acce
 
 ---
 
+## Local Data
+
+mythos-router stores local state in predictable locations:
+
+* `MEMORY.md` in the project root stores the human-readable agentic memory log.
+* `memory.db`, `memory.db-wal`, and `memory.db-shm` in the project root are derivative SQLite indexes rebuilt from `MEMORY.md`.
+* `.mythos/receipts/` stores local SWD receipts. These may include prompts, file paths, hashes, provider metadata, budget data, test command names, and a short redacted test output tail. This directory is gitignored by default.
+* `~/.mythos-router/sessions/latest.json` stores the latest resumable conversation history and budget state.
+* `~/.mythos-router/metrics.json` stores local token, cost, duration, command, and project metrics for `mythos stats`.
+* `~/.mythos-router/cache.db` may store SDK response-cache entries when the cache API is used. Responses containing tool calls or SWD file actions are not cached.
+* `~/.mythos-router/skills/` stores user-provided skill instructions loaded only when selected.
+
+Treat session files, receipts, memory, and cache files as private project data. Delete the relevant file or directory to clear that local state.
+
+---
+
 ## Scope
 
 This tool is designed for **local execution only**.

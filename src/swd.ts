@@ -273,7 +273,7 @@ export class SWDEngine {
       if (seenPaths.has(action.path)) continue;
       const absPath = resolveSafePath(action.path);
       const original = ctx.logs.rollbackMap.get(absPath);
-      const after = ctx.getSnapshot(action.path, 'after');
+      const after = ctx.getCachedAfterSnapshot(action.path);
       const current = snapshotFile(absPath);
 
       if (!original) continue;
@@ -328,6 +328,11 @@ class InternalSessionContext {
   }
 
   public logExecution(action: FileAction): void { this.logs.executionOrder.push(action); }
+
+  public getCachedAfterSnapshot(path: string): FileSnapshot {
+    const absPath = resolveSafePath(path);
+    return this.snapshots.after.get(absPath) ?? this.getSnapshot(path, 'after');
+  }
 }
 
 export function resolveSafePath(unsafePath: string): string {

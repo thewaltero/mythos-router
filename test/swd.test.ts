@@ -116,29 +116,32 @@ describe('SWDEngine (Production v1 API)', () => {
   });
 
   it('Hardening: Detects and respects concurrency drift during rollback', async () => {
-    // This requires manual orchestration because SWDEngine is a black box
-    // We simulate it by running two engines or manually modifying disk mid-run
-    // Since we want to test SWDEngine's internal rollback logic:
     mkdirSync(testDir, { recursive: true });
     const fileA = join(testDir, 'concurrency.txt');
     writeFileSync(fileA, 'initial', 'utf-8');
 
-    // To simulate concurrency in a black-box test, we need a way to hook into the lifecycle.
-    // For now, we rely on the InternalSessionContext being tested indirectly or keep the
-    // unit test for InternalSessionContext if we expose it (user said hide it).
-    
-    // Instead, let's test that NOOP works as intended
-    const engine = new SWDEngine();
+    const engine = new SWDEngine({
+      strict: true,
+      enableRollback: true,
+      onVerify: () => {
+        writeFileSync(fileA, 'external-change', 'utf-8');
+      },
+    });
+
     const result = await engine.run([{
       path: fileA,
       operation: 'MODIFY',
-      intent: 'NOOP',
-      content: 'initial',
-      description: 'intentional noop'
+      intent: 'MUTATE',
+      content: 'new content',
+      contentHash: 'wrong_hash',
+      description: 'drift with external edit before rollback'
     }]);
 
-    assert.strictEqual(result.success, true);
-    assert.strictEqual(result.results[0]?.status, 'noop');
+    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.results[0]?.status, 'drift');
+    assert.strictEqual(result.rolledBack, false);
+    assert.match(result.rollbackErrors[0] ?? '', /Concurrency Drift/);
+    assert.strictEqual(readFileSync(fileA, 'utf-8'), 'external-change');
 
     rmSync(testDir, { recursive: true, force: true });
   });
