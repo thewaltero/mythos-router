@@ -56,7 +56,7 @@ Zero slop. Zero hallucinated state. Full adaptive thinking.
 |  **mythos init** | Single-command project onboarding with environment validation, read-only `--check`, and scaffolding |
 |  **mythos run** | One-shot prompt mode with inline, file, or stdin input: same SWD, budget, skills, branch, and optional test-healing pipeline as chat |
 |  **Multi-Provider Fallback** | Auto-routes between Anthropic, DeepSeek, and OpenAI with circuit breakers |
-|  **Skills Protocol** | Inject modular expert plugins via YAML frontmatter (`-s mcp`, `-s react`) |
+|  **Verified Skill Packs** | Load project-local or user-global `SKILL.md` rules with `-s <name>`; active skills are recorded in SWD receipts |
 |  **Deterministic Caching** | SQLite-backed caching for reasoning (SDK only) *(Node 22+)* |
 |  **Adaptive Thinking** | Opus 4.7 with configurable effort levels (high/medium/low) |
 |  **Strict Write Discipline** | Pre/post filesystem snapshots verify every model claim |
@@ -145,6 +145,27 @@ mythos init --check          # Check environment and project setup without writi
 mythos init --force          # Re-scaffold files even if they already exist
 ```
 
+`init` prepares the local repo surface Mythos uses: `.mythosignore`, `MEMORY.md`, and the project-local `.mythos/skills/` directory.
+
+### `mythos skills` - Verified Skill Packs
+
+```bash
+mythos skills                # List project-local and user-global skills
+mythos skills new repo       # Create .mythos/skills/repo/SKILL.md
+mythos skills new audit --global  # Create ~/.mythos-router/skills/audit/SKILL.md
+mythos skills show repo      # Inspect metadata and instructions
+mythos skills check          # Validate all discovered skills
+```
+
+Skill packs are repo operating manuals for Mythos. They encode project conventions, files to read first, files to avoid, review expectations, and verification rules without adding runtime code. Project-local skills live in `.mythos/skills/<name>/SKILL.md` and win over global skills with the same name. User-global skills live in `~/.mythos-router/skills/<name>/SKILL.md` for personal reuse across repositories.
+
+```bash
+mythos run --file TASK.md -s repo
+mythos chat -s repo -s security-review
+```
+
+When a non-dry-run SWD operation creates a receipt, Mythos records the active skill ids and versions. That makes skill-guided changes auditable: reviewers can see which repo rules were loaded when the verified edit happened. See [`docs/skills.md`](docs/skills.md) for the format and examples.
+
 ### `mythos run` — One-Shot Task
 
 ```bash
@@ -162,7 +183,7 @@ mythos run "refactor provider scoring" --branch provider-score
 
 ```bash
 mythos chat                  # Full power (high effort, Opus 4.7)
-mythos chat -s react         # Load the 'react' expert skill
+mythos chat -s repo          # Load a project-local skill pack
 mythos chat --test-cmd "npm test" # Enable autonomous test-driven self-healing
 mythos chat --effort low     # Budget mode (Haiku 4.5)
 mythos chat --effort medium  # Balanced (Sonnet 4.6)
@@ -228,7 +249,7 @@ mythos receipts verify latest  # Re-check current files against receipt hashes
 mythos receipts --json       # Machine-readable output for tooling
 ```
 
-Every non-dry-run SWD file operation writes a local receipt to `.mythos/receipts/`. Receipts include the user request summary, provider/model, token usage, budget snapshot, git branch/commit, per-file before/after hashes, rollback status, and optional `--test-cmd` result. `verify` turns those receipts into a quick drift check for "did the files still match what SWD verified?" Receipts are local by default and gitignored by default. They may include prompts, file paths, provider metadata, test command names, and a short test output tail. Do not publish raw receipts from private repositories; force-add only when you intentionally want a shared audit trail.
+Every non-dry-run SWD file operation writes a local receipt to `.mythos/receipts/`. Receipts include the user request summary, provider/model, token usage, budget snapshot, active skill packs, git branch/commit, per-file before/after hashes, rollback status, and optional `--test-cmd` result. `verify` turns those receipts into a quick drift check for "did the files still match what SWD verified?" Receipts are local by default and gitignored by default. They may include prompts, file paths, provider metadata, skill names, test command names, and a short test output tail. Do not publish raw receipts from private repositories; force-add only when you intentionally want a shared audit trail.
 
 ### `mythos verify` — Local Memory Scan + CI Verification
 
@@ -339,6 +360,7 @@ mythos-router/
 │   ├── swd.ts           # SWD execution kernel (engine, types, parsing, snapshots)
 │   ├── swd-cli.ts       # SWD terminal presentation (verification output, dry-run)
 │   ├── receipts.ts      # SWD trust receipt creation, storage, and verification
+│   ├── skills.ts        # Project-local and user-global SKILL.md packs
 │   ├── ci/              # Read-only CI verification for PR/diff risk review
 │   ├── memory.ts        # MEMORY.md self-healing manager (SQLite FTS5 index)
 │   ├── metrics.ts       # Global metrics store (persistent budget tracking)
@@ -348,8 +370,10 @@ mythos-router/
 │   ├── index.ts         # Public SDK exports
 │   └── commands/
 │       ├── chat.ts      # Interactive REPL (ChatSession + ChatUI abstraction)
+│       ├── init.ts      # Project onboarding and read-only setup checks
 │       ├── verify.ts    # Codebase ↔ Memory scanner (dry-run aware)
 │       ├── receipts.ts  # SWD receipt list/show/verify command
+│       ├── skills.ts    # Skill pack list/show/new/check command
 │       ├── dream.ts     # Memory compression (dry-run aware)
 │       └── stats.ts     # Budget analytics reporter
 ├── src/providers/       # Multi-Provider Orchestration Engine
@@ -412,7 +436,11 @@ If you prefer to keep it private, add `MEMORY.md` to your `.gitignore`.
 | File | Purpose |
 |------|---------| 
 | `.mythosignore` | Patterns to exclude from SWD scanning |
+| `.mythos/skills/` | Optional project-local skill packs that can be committed with a repo |
+| `.mythos/receipts/` | Local SWD receipts, gitignored by default because they may include prompts and file paths |
 | `MEMORY.md` | Auto-generated agentic memory log |
+| `~/.mythos-router/skills/` | User-global skill packs available across projects |
+| `~/.mythos-router/sessions/` | Resumable chat session state |
 
 ---
 
