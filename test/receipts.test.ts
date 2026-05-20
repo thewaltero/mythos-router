@@ -79,6 +79,22 @@ describe('SWD receipts', () => {
         inputTokens: 100,
         outputTokens: 25,
       },
+      skills: [
+        {
+          id: 'repo',
+          name: 'repo',
+          version: '1.0.0',
+          source: 'project',
+          path: '.mythos/skills/repo/SKILL.md',
+        },
+        {
+          id: 'personal',
+          name: 'personal',
+          version: '0.1.0',
+          source: 'global',
+          path: join(tmpdir(), 'personal', 'SKILL.md'),
+        },
+      ],
     });
 
     const savedPath = saveSWDReceipt(receipt);
@@ -96,6 +112,11 @@ describe('SWD receipts', () => {
     assert.equal(verification.ok, true);
     assert.equal(verification.files[0]!.status, 'ok');
     assert.equal(receipt.files[0]!.after?.path, filePath);
+    assert.equal(receipt.skills?.[0]?.id, 'repo');
+    assert.equal(receipt.skills?.[0]?.source, 'project');
+    assert.equal(receipt.skills?.[0]?.path, '.mythos/skills/repo/SKILL.md');
+    assert.equal(receipt.skills?.[1]?.id, 'personal');
+    assert.equal(receipt.skills?.[1]?.path, undefined);
   });
 
   it('normalizes receipt paths even when cwd is a symlinked project root', (t) => {

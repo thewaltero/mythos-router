@@ -29,6 +29,7 @@ describe('CLI Smoke Tests', () => {
       assert.ok(output.includes('Usage: mythos [options] [command]'));
       assert.ok(output.includes('chat [options]'));
       assert.ok(output.includes('run [options]'));
+      assert.ok(output.includes('skills [options]'));
       assert.ok(output.includes('init [options]'));
     } catch (err: any) {
       assert.fail(
@@ -80,12 +81,55 @@ describe('CLI Smoke Tests', () => {
         false,
         'init --check should not create MEMORY.md',
       );
+
+      assert.equal(
+        existsSync(join(tempDir, '.mythos')),
+        false,
+        'init --check should not create .mythos',
+      );
     } catch (err: any) {
       assert.fail(
         `init --check failed: ${err.message}\n${err.stdout ?? ''}\n${err.stderr ?? ''}`,
       );
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('runs skills list and check in a temporary directory without creating project files', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'mythos-skills-cli-'));
+    const globalDir = mkdtempSync(join(tmpdir(), 'mythos-skills-cli-global-'));
+    const cliPath = join(process.cwd(), 'dist', 'cli.js');
+    const env = { ...process.env, MYTHOS_SKILLS_DIR: globalDir };
+
+    try {
+      const listed = JSON.parse(execFileSync(
+        process.execPath,
+        [cliPath, 'skills', '--json'],
+        { cwd: tempDir, env, encoding: 'utf-8' },
+      ));
+      assert.deepEqual(listed, []);
+
+      const checked = JSON.parse(execFileSync(
+        process.execPath,
+        [cliPath, 'skills', 'check', '--json'],
+        { cwd: tempDir, env, encoding: 'utf-8' },
+      ));
+      assert.equal(checked.ok, true);
+      assert.equal(checked.checked, 0);
+
+      assert.equal(
+        existsSync(join(tempDir, '.mythos')),
+        false,
+        'skills list/check should not create .mythos',
+      );
+    } catch (err: any) {
+      assert.fail(
+        `skills CLI smoke failed: ${err.message}\n${err.stdout ?? ''}\n${err.stderr ?? ''}`,
+      );
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+      rmSync(globalDir, { recursive: true, force: true });
     }
   });
 
