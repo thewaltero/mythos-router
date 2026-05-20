@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.10.0] - 2026-05-20
+
+### Added
+- **`mythos skills` Command** - Added first-class skill pack management through `mythos skills`, `mythos skills show <name>`, `mythos skills new <name>`, and `mythos skills check`.
+- **Project-Local Skill Packs** - Added `.mythos/skills/<name>/SKILL.md` support so repositories can ship their own Mythos operating rules without relying on a user's global setup.
+- **Global Skill Packs** - Preserved reusable user-global skills in `~/.mythos-router/skills/<name>/SKILL.md`, with project-local skills taking precedence when names overlap.
+- **Skill Receipt Metadata** - SWD receipts now record active skill ids, names, versions, and sources so verified edits can be reviewed with the rule packs that guided them.
+- **Skill Documentation and Examples** - Added a dedicated skills guide plus example `repo` and `security-review` skill packs.
+- **Skill SDK Helpers** - Exported skill loading, listing, validation, creation, and prompt-building helpers through the public SDK entry point.
+
+### Changed
+- **Project Initialization** - `mythos init` now scaffolds and checks the project-local `.mythos/skills/` directory as part of repo onboarding.
+- **Skill Validation** - Skill checks now validate numeric limits, parse frontmatter arrays more consistently, and detect incompatibilities by either skill id or skill name.
+- **Receipt Privacy** - Receipt skill paths are stored only when they resolve inside the current project, avoiding accidental leakage of user-global or outside-project paths.
+
+---
+
 ## [1.9.0] - 2026-05-19
 
 ### Added
@@ -323,6 +340,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Correction Turns** — max 2 retries before yielding to human.
 - **Dream/Verify Commands** — memory compression and drift detection.
 
+[1.10.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.10.0
 [1.9.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.9.0
 [1.8.1]: https://github.com/thewaltero/mythos-router/releases/tag/v1.8.1
 [1.8.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.8.0
