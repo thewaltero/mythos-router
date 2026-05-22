@@ -53,6 +53,7 @@ Zero slop. Zero hallucinated state. Full adaptive thinking.
 | Feature | Description |
 |---------|-------------|
 |  **mythos init** | Single-command project onboarding with environment validation, read-only `--check`, and scaffolding |
+|  **mythos learn** | Generate a repo-local `SKILL.md` from detected project structure, scripts, docs, CI, and risk surfaces |
 |  **mythos run** | One-shot prompt mode with inline, file, or stdin input: same SWD, budget, skills, branch, and optional test-healing pipeline as chat |
 |  **Multi-Provider Fallback** | Auto-routes between Anthropic, DeepSeek, and OpenAI with circuit breakers |
 |  **Verified Skill Packs** | Load project-local or user-global `SKILL.md` rules with `-s <name>`; active skills are recorded in SWD receipts |
@@ -145,6 +146,17 @@ mythos init --force          # Re-scaffold files even if they already exist
 ```
 
 `init` prepares the local repo surface Mythos uses: `.mythosignore`, `MEMORY.md`, and the project-local `.mythos/skills/` directory.
+
+### `mythos learn` - Repo Skill Generation
+
+```bash
+mythos learn                 # Generate .mythos/skills/repo/SKILL.md
+mythos learn --dry-run       # Preview the generated skill without writing files
+mythos learn --force         # Overwrite an existing repo skill
+mythos learn --name backend  # Generate .mythos/skills/backend/SKILL.md
+```
+
+`learn` turns the current repo into a reviewable project skill. It scans local repo signals such as `README.md`, `package.json`, source directories, CI workflows, config files, docs, tests, package scripts, public exports, and security-sensitive paths. It does not run npm scripts, shell commands, tests, builds, or a model. The generated `SKILL.md` is a deterministic starting point that should be inspected and edited like any other project file.
 
 ### `mythos skills` - Verified Skill Packs
 
@@ -360,6 +372,7 @@ mythos-router/
 │   ├── swd-cli.ts       # SWD terminal presentation (verification output, dry-run)
 │   ├── receipts.ts      # SWD trust receipt creation, storage, and verification
 │   ├── skills.ts        # Project-local and user-global SKILL.md packs
+│   ├── learn.ts         # Deterministic repo skill generator
 │   ├── ci/              # Read-only CI verification for PR/diff risk review
 │   ├── memory.ts        # MEMORY.md self-healing manager (SQLite FTS5 index)
 │   ├── metrics.ts       # Global metrics store (persistent budget tracking)
@@ -373,6 +386,7 @@ mythos-router/
 │       ├── verify.ts    # Codebase ↔ Memory scanner (dry-run aware)
 │       ├── receipts.ts  # SWD receipt list/show/verify command
 │       ├── skills.ts    # Skill pack list/show/new/check command
+│       ├── learn.ts     # Repo skill generation command
 │       ├── dream.ts     # Memory compression (dry-run aware)
 │       └── stats.ts     # Budget analytics reporter
 ├── src/providers/       # Multi-Provider Orchestration Engine
