@@ -47,7 +47,7 @@
     "developer-tools",
     "coding-assistant",
     "filesystem-verification",
-    "strict-write-discipline"
+    "strict-write-discipline",
     "swd",
     "external-agent",
     "agent-verification",
