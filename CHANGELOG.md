@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.12.0] - 2026-05-24
+
+### Added
+- **External Agent SWD Interface** - Added `mythos swd apply` so external agents can submit structured file actions to Mythos without calling a model provider or requiring an Anthropic key.
+- **Model Free SWD Automation** - Added `--stdin`, `--file <path>`, and `--json` support for machine readable external agent workflows.
+- **External Agent Receipt Metadata** - SWD receipts can now identify external agent/model sources for verified non-dry-run executions.
+
+### Changed
+- **Provider Key Validation** - `mythos chat` and `mythos run` now require at least one configured provider key instead of requiring Anthropic specifically, preserving Anthropic as the recommended/default provider when present.
+- **README and SDK Documentation** - Documented the agent neutral SWD execution flow, security defaults, BYOK provider selection, and receipt behavior for external agent use.
+
+### Security
+- **Fail Closed External Actions** - External SWD input is size limited, schema validated, constrained to safe project relative paths, and reviewed before filesystem mutation.
+- **Sensitive Path Protection** - External agent actions block `.env`, private keys, wallet files, `.git`, `.npmrc`, and secret-like paths by default. High impact command surface files and deletes require explicit `--allow-risky`.
+- **No Model Execution Boundary** - `mythos swd apply` does not call Anthropic, OpenAI, DeepSeek, provider fallback, memory compression, or test-healing; it only applies and verifies supplied file actions through SWD.
+
+---
+
 ## [1.11.0] - 2026-05-22
 
 ### Added
@@ -350,6 +368,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Correction Turns** — max 2 retries before yielding to human.
 - **Dream/Verify Commands** — memory compression and drift detection.
 
+[1.12.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.11.0
 [1.11.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.11.0
 [1.10.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.10.0
 [1.9.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.9.0
