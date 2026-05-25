@@ -82,6 +82,30 @@ Follow local project rules.
     assert.equal(loaded.meta.name, 'custom');
   });
 
+  it('parses skill frontmatter without regex-sensitive key matching', () => {
+    const skillDir = join(tempDir, 'parser-skill');
+    mkdirSync(skillDir, { recursive: true });
+    const skillPath = join(skillDir, 'SKILL.md');
+    writeFileSync(skillPath, `---
+name: parser
+version: 1.0.0
+description: Safe parser skill.
+requires-tools:
+  - swd
+  - receipts
+-:${' '.repeat(10_000)}
+---
+
+# Parser
+
+Follow local project rules.
+`, 'utf-8');
+
+    const loaded = loadSkill(skillPath);
+    assert.equal(loaded.meta.name, 'parser');
+    assert.deepEqual(loaded.meta.requiresTools, ['swd', 'receipts']);
+  });
+
   it('reports malformed skills during check', () => {
     const badDir = join(getGlobalSkillsDir(), 'bad');
     mkdirSync(badDir, { recursive: true });
