@@ -14,10 +14,10 @@ export interface PolicyReview {
 }
 
 const BLOCKED_PATTERNS: RegExp[] = [
-  /^\.env(?:\.|$)/i,
-  /^\.npmrc$/i,
-  /^\.git(?:\/|$)/i,
-  /^\.ssh(?:\/|$)/i,
+  /(?:^|\/)\.env(?:\.|$)/i,
+  /(?:^|\/)\.npmrc$/i,
+  /(?:^|\/)\.git(?:\/|$)/i,
+  /(?:^|\/)\.ssh(?:\/|$)/i,
   /(?:^|\/)id_rsa$/i,
   /(?:^|\/)id_ed25519$/i,
   /\.(?:pem|key|p12|pfx)$/i,
@@ -27,26 +27,26 @@ const BLOCKED_PATTERNS: RegExp[] = [
 ];
 
 const CONFIRM_PATTERNS: RegExp[] = [
-  /^package\.json$/i,
-  /^package-lock\.json$/i,
-  /^npm-shrinkwrap\.json$/i,
-  /^pnpm-lock\.yaml$/i,
-  /^yarn\.lock$/i,
-  /^bun\.lockb$/i,
-  /^scripts\//i,
-  /^\.github\/workflows\//i,
-  /^Dockerfile$/i,
-  /^docker-compose\.ya?ml$/i,
+  /(?:^|\/)package\.json$/i,
+  /(?:^|\/)package-lock\.json$/i,
+  /(?:^|\/)npm-shrinkwrap\.json$/i,
+  /(?:^|\/)pnpm-lock\.yaml$/i,
+  /(?:^|\/)yarn\.lock$/i,
+  /(?:^|\/)bun\.lockb$/i,
+  /(?:^|\/)scripts\//i,
+  /(?:^|\/)\.github\/workflows\//i,
+  /(?:^|\/)Dockerfile$/i,
+  /(?:^|\/)docker-compose\.ya?ml$/i,
   /\.(?:sh|bash|zsh|fish|ps1|bat|cmd)$/i,
   /(?:^|\/)(?:vite|webpack|rollup|eslint|tsup|jest|vitest|babel|next|nuxt|svelte|astro)\.config\./i,
 ];
 
 const COMMAND_SURFACE_PATTERNS: RegExp[] = [
   ...CONFIRM_PATTERNS,
-  /^Makefile$/i,
-  /^justfile$/i,
-  /^\.husky\//i,
-  /^\.vscode\/tasks\.json$/i,
+  /(?:^|\/)Makefile$/i,
+  /(?:^|\/)justfile$/i,
+  /(?:^|\/)\.husky\//i,
+  /(?:^|\/)\.vscode\/tasks\.json$/i,
 ];
 
 export function normalizeActionPath(filePath: string): string {
