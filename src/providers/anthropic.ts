@@ -66,6 +66,27 @@ export class AnthropicProvider implements BaseProvider {
     if (effort && effort in MODELS) return MODELS[effort];
     return MODELS.high;
   }
+  
+  // ── Extended-thinking budget from effort level ───────────
+  // The real Anthropic Messages API expects
+  //   thinking: { type: 'enabled', budget_tokens: N }
+  // where budget_tokens is >= 1024 and STRICTLY less than max_tokens
+  // (the thinking budget is drawn from the max_tokens pool).
+  // 'low' effort — and any case without enough headroom for both a
+  // minimal think and a minimal answer — disables extended thinking.
+  private resolveThinking(
+    effort: string,
+    maxTokens: number,
+  ): { type: 'enabled'; budget_tokens: number } | undefined {
+    const target = effort === 'high' ? 10_000 : effort === 'medium' ? 4_000 : 0;
+    if (target <= 0) return undefined;
+
+    // Reserve at least 1024 tokens for the actual answer.
+    const budget = Math.min(target, maxTokens - 1024);
+    if (budget < 1024) return undefined;
+
+    return { type: 'enabled', budget_tokens: budget };
+  }
 
   // ── Streaming Message ────────────────────────────────────
   async streamMessage(
@@ -73,7 +94,8 @@ export class AnthropicProvider implements BaseProvider {
     options: StreamOptions,
   ): Promise<UnifiedResponse> {
     const apiMessages = this.sanitizeMessages(messages);
-    const model = this.resolveModel(options.effort);
+    const effort = options.effort ?? 'high';
+    const model = this.resolveModel(effort);
     const maxTokens = options.maxTokens ?? 16384;
     const systemPrompt = options.systemPrompt || CAPYBARA_SYSTEM_PROMPT;
     const startTime = Date.now();
@@ -85,12 +107,12 @@ export class AnthropicProvider implements BaseProvider {
 
     let stream;
     try {
-      const supportsAdaptive = model.includes('opus') || model.includes('sonnet');
-      stream = await (this.client.messages.stream as any)({
+      const supportsThinking = model.includes('opus') || model.includes('sonnet');
+      const thinking = supportsThinking ? this.resolveThinking(effort, maxTokens) : undefined;
+      stream = await this.client.messages.stream({
         model,
         max_tokens: maxTokens,
-        ...(supportsAdaptive ? { thinking: { type: 'adaptive' } } : {}),
-        output_config: { effort: (options.effort as 'high' | 'medium' | 'low') || 'high' },
+        ...(thinking ? { thinking } : {}),
         system: systemPrompt,
         messages: apiMessages,
       }, { signal: options.signal });
@@ -168,19 +190,20 @@ export class AnthropicProvider implements BaseProvider {
     options: SendOptions,
   ): Promise<UnifiedResponse> {
     const apiMessages = this.sanitizeMessages(messages);
-    const model = this.resolveModel(options.effort);
+    const effort = options.effort ?? 'low';
+    const model = this.resolveModel(effort);
     const maxTokens = options.maxTokens ?? 8192;
     const systemPrompt = options.systemPrompt || CAPYBARA_SYSTEM_PROMPT;
     const startTime = Date.now();
 
     let response;
     try {
-      const supportsAdaptive = model.includes('opus') || model.includes('sonnet');
-      response = await (this.client.messages.create as any)({
+      const supportsThinking = model.includes('opus') || model.includes('sonnet');
+      const thinking = supportsThinking ? this.resolveThinking(effort, maxTokens) : undefined;
+      response = await this.client.messages.create({
         model,
         max_tokens: maxTokens,
-        ...(supportsAdaptive ? { thinking: { type: 'adaptive' } } : {}),
-        output_config: { effort: (options.effort as 'high' | 'medium' | 'low') || 'low' },
+        ...(thinking ? { thinking } : {}),
         system: systemPrompt,
         messages: apiMessages,
       }, { signal: options.signal });
@@ -193,8 +216,7 @@ export class AnthropicProvider implements BaseProvider {
 
     for (const block of response.content) {
       if (block.type === 'thinking') {
-        const thinkingBlock = block as { type: 'thinking'; thinking: string };
-        thinkingText += thinkingBlock.thinking ?? '';
+        thinkingText += block.thinking ?? '';
       } else if (block.type === 'text') {
         responseText += block.text;
       }

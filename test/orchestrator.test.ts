@@ -150,22 +150,4 @@ describe('ProviderOrchestrator', () => {
     assert.equal(failing.sendCalls, 1);
     assert.equal(fallback.sendCalls, 0);
   });
-
-  it('routes tool-required requests only to tool-capable providers', async () => {
-    const orchestrator = new ProviderOrchestrator(noopTelemetry);
-    const textOnly = new FakeProvider('text-only', ['streaming']);
-    const toolCapable = new FakeProvider('tool-capable', ['streaming', 'tool_calling']);
-
-    orchestrator.registerProvider(textOnly, { priority: 0 });
-    orchestrator.registerProvider(toolCapable, { priority: 1 });
-
-    const response = await orchestrator.sendMessage(
-      messages,
-      { ...sendOptions, requiresTools: true },
-    );
-
-    assert.equal(response.metadata.providerId, 'tool-capable');
-    assert.equal(textOnly.sendCalls, 0);
-    assert.equal(toolCapable.sendCalls, 1);
-  });
 });

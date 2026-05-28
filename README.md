@@ -570,16 +570,13 @@ User Input
                 └── Still failing → Yield to human
 ```
 
----
+### Why text-based `FILE_ACTION` blocks instead of native tool-calling?
 
-## MEMORY.md — Should You Commit It?
+This is a deliberate design choice, not a missing feature. Mythos asks the model to emit file operations as plain-text `[FILE_ACTION]` blocks (parsed by `parseActions` in `swd.ts`) rather than using a provider's native function/tool-calling API. The tradeoffs:
 
-**Yes.** `MEMORY.md` is designed to be committed to your repository. It becomes a "collaborative brain" where:
-- Multiple developers can see what the AI did in previous sessions
-- Different AI agents can reference past context
-- You get a full audit trail of every AI-assisted file operation
-
-If you prefer to keep it private, add `MEMORY.md` to your `.gitignore`.
+- **Provider-agnostic by construction.** The exact same protocol works across Anthropic, OpenAI, and DeepSeek — and any future model, including ones with no tool-calling API at all. There is no per-provider tool plumbing to maintain, which is what lets BYOK fallback route a single conversation across heterogeneous providers.
+- **It is the right fit for SWD.** The model only ever *claims* an operation; the claim is then verified against the real filesystem with SHA-256 snapshots and rolled back on mismatch. The trust boundary is the filesystem, not the model's output format, so a structured tool-call would buy little over a parsed text block here.
+- **Honest about the limits.** Text parsing is more fragile than schema-enforced JSON tool calls — a malformed block is dropped (and surfaced as a warning) rather than executed, and provider-side guarantees like enforced argument schemas or parallel tool calls are not used. Provider `capabilities` therefore describe only `thinking`/`streaming`; native tool-calling is intentionally not modeled.
 
 ---
 
@@ -622,6 +619,8 @@ If you prefer to keep it private, add `MEMORY.md` to your `.gitignore`.
 > - CJK languages (Chinese/Japanese/Korean) and code (Python) see smaller regressions (+4-21%).
 > 
 > *Bottom line: Expect your English-heavy mythos-router sessions to cost up to 59% more with Opus 4.7 than they did with 4.6, simply due to tokenizer changes.*
+
+> **Note on token accounting:** Mythos reports the **real token usage returned by the provider API** whenever it is available. When a provider does not return usage (e.g. some streaming responses), Mythos falls back to a rough `characters / 4` estimate purely to drive the in-session budget bar — it is a guardrail, not an exact tokenizer. Treat the displayed cost figures as estimates and rely on your provider's billing dashboard for exact charges.
 
 > Pricing constants live in `src/config.ts`. When Anthropic updates rates, change two lines — no budget math to refactor.
 

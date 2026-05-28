@@ -8,7 +8,6 @@ import {
   type UnifiedResponse,
   type ProviderConfig,
   type ProviderStatus,
-  type ProviderCapability,
   type OrchestrationEvent,
 } from './types.js';
 import { calculateCost } from './pricing.js';
@@ -174,7 +173,6 @@ export class ProviderOrchestrator {
   private selectProvider(
     messages: Message[],
     options: StreamOptions | SendOptions,
-    requiredCapabilities?: ProviderCapability[],
   ): ProviderSlot[] {
     const now = Date.now();
 
@@ -189,13 +187,6 @@ export class ProviderOrchestrator {
     let eligible = this.slots.filter(slot => {
       if (!slot.config.enabled) return false;
       if (slot.status === 'down') return false;
-
-      // Capability mismatch check
-      if (requiredCapabilities) {
-        for (const cap of requiredCapabilities) {
-          if (!slot.provider.capabilities.has(cap)) return false;
-        }
-      }
 
       // Concurrency check (skip full providers unless they're the only option)
       if (slot.activeConcurrency >= slot.config.maxConcurrency) return false;
@@ -381,10 +372,7 @@ export class ProviderOrchestrator {
     messages: Message[],
     options: StreamOptions,
   ): Promise<UnifiedResponse> {
-    const requiredCapabilities: ProviderCapability[] | undefined = options.requiresTools
-      ? ['tool_calling']
-      : undefined;
-    const candidates = this.selectProvider(messages, options, requiredCapabilities);
+    const candidates = this.selectProvider(messages, options);
     const taskType = options.taskType ?? 'unknown';
     this.logRoutingDecision(messages, taskType, candidates);
 
@@ -536,10 +524,7 @@ export class ProviderOrchestrator {
     messages: Message[],
     options: SendOptions,
   ): Promise<UnifiedResponse> {
-    const requiredCapabilities: ProviderCapability[] | undefined = options.requiresTools
-      ? ['tool_calling']
-      : undefined;
-    const candidates = this.selectProvider(messages, options, requiredCapabilities);
+    const candidates = this.selectProvider(messages, options);
     const taskType = options.taskType ?? 'unknown';
     this.logRoutingDecision(messages, taskType, candidates);
 

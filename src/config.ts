@@ -28,10 +28,9 @@ export const MAX_OUTPUT_TOKENS_STREAM = 16384;
 export const MAX_OUTPUT_TOKENS_SEND = 8192;
 
 // ── Anthropic Pricing (USD per token) ────────────────────────
-// Claude Opus 4.7 pricing as of 2026-04.
-// NOTE: Opus 4.7 uses a new tokenizer. While per-token prices are identical to 4.6,
-// it requires up to ~59% more tokens for English text, making it effectively more expensive.
-// Update these when Anthropic changes rates.
+// Claude Opus pricing as of 2026-04. Update these when Anthropic changes rates.
+// Note: when the provider API does not return token usage, budget/cost figures
+// fall back to a rough characters/4 estimate — a guardrail, not exact billing.
 // Source: https://docs.anthropic.com/en/docs/about-claude/pricing
 export const COST_PER_INPUT_TOKEN = 5 / 1_000_000; // $5.00 / 1M input tokens
 export const COST_PER_OUTPUT_TOKEN = 25 / 1_000_000; // $25.00 / 1M output tokens

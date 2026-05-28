@@ -51,7 +51,6 @@ export interface RequestOptions {
   forceProvider?: string;
   allowFallback?: boolean;
   timeoutMs?: number;
-  requiresTools?: boolean;
   signal?: AbortSignal;
 }
 
@@ -72,7 +71,11 @@ export interface SendOptions extends RequestOptions {
 }
 
 // ── Provider Capabilities ────────────────────────────────────
-export type ProviderCapability = 'thinking' | 'tool_calling' | 'streaming';
+// Descriptive metadata only: documents what a backend supports. Native
+// tool-calling is intentionally not modeled here — Mythos routes file
+// operations through the text-based FILE_ACTION protocol (see swd.ts), which
+// is provider-agnostic and verified against the filesystem.
+export type ProviderCapability = 'thinking' | 'streaming';
 
 // ── Provider Health Status ───────────────────────────────────
 export type ProviderStatus = 'healthy' | 'degraded' | 'down';

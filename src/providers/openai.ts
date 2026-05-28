@@ -14,6 +14,20 @@ export interface OpenAIProviderConfig {
   baseUrl: string;           // e.g. 'https://api.openai.com/v1'
   defaultModel: string;      // e.g. 'gpt-4o', 'deepseek-chat'
   supportsThinking?: boolean; // DeepSeek reasoner, o1/o3 have reasoning
+  /**
+   * Reasoning models (OpenAI o1/o3/o4 family) require `max_completion_tokens`
+   * instead of `max_tokens` and reject the `system` role. Auto-detected from
+   * the model name when omitted; set explicitly to override detection.
+   */
+  reasoningModel?: boolean;
+}
+
+// OpenAI reasoning models (o1, o3, o4-mini, …) use a different request shape
+// than chat models: they require `max_completion_tokens` instead of
+// `max_tokens` and do not accept the `system` role. Detect them by the
+// canonical "o<digit>" model-name prefix.
+function detectReasoningModel(model: string): boolean {
+  return /^o[0-9]/i.test(model);
 }
 
 function parseSSELine(line: string): Record<string, unknown> | null {
@@ -36,6 +50,7 @@ export class OpenAIProvider implements BaseProvider {
   private baseUrl: string;
   private defaultModel: string;
   private supportsThinking: boolean;
+  private reasoningModel: boolean;
 
   constructor(config: OpenAIProviderConfig) {
     this.id = config.id;
@@ -43,10 +58,55 @@ export class OpenAIProvider implements BaseProvider {
     this.baseUrl = config.baseUrl.replace(/\/+$/, ''); // Strip trailing slash
     this.defaultModel = config.defaultModel;
     this.supportsThinking = config.supportsThinking ?? false;
+    this.reasoningModel = config.reasoningModel ?? detectReasoningModel(config.defaultModel);
 
     const caps: ProviderCapability[] = ['streaming'];
     if (this.supportsThinking) caps.push('thinking');
     this.capabilities = new Set(caps);
+  }
+
+  // ── Request Construction ─────────────────────────────────
+  // Reasoning models reject the `system` role; the documented replacement is
+  // the `developer` role. Chat models keep `system`. The system prompt is only
+  // added when present.
+  private buildChatMessages(
+    messages: Message[],
+    systemPrompt?: string,
+  ): Array<{ role: string; content: string }> {
+    const turns = messages.map(m => ({ role: m.role, content: m.content }));
+    const sys = systemPrompt?.trim();
+    if (!sys) return turns;
+    const systemRole = this.reasoningModel ? 'developer' : 'system';
+    return [{ role: systemRole, content: sys }, ...turns];
+  }
+
+  private buildRequestBody(
+    messages: Message[],
+    options: StreamOptions | SendOptions,
+    defaultMaxTokens: number,
+    stream: boolean,
+  ): Record<string, unknown> {
+    const maxTokens = options.maxTokens ?? defaultMaxTokens;
+    const body: Record<string, unknown> = {
+      model: this.defaultModel,
+      messages: this.buildChatMessages(messages, options.systemPrompt),
+    };
+
+    // Reasoning models require `max_completion_tokens`; chat models use `max_tokens`.
+    if (this.reasoningModel) {
+      body.max_completion_tokens = maxTokens;
+    } else {
+      body.max_tokens = maxTokens;
+    }
+
+    if (stream) {
+      body.stream = true;
+      // Ask OpenAI-compatible APIs to emit a final usage chunk so we report
+      // real token counts instead of a char/4 estimate.
+      body.stream_options = { include_usage: true };
+    }
+
+    return body;
   }
 
   private async processSSEStream(
@@ -113,15 +173,7 @@ export class OpenAIProvider implements BaseProvider {
     const model = this.defaultModel;
     const startTime = Date.now();
 
-    const body: Record<string, unknown> = {
-      model,
-      messages: [
-        { role: 'system', content: options.systemPrompt },
-        ...messages.map(m => ({ role: m.role, content: m.content })),
-      ],
-      max_tokens: options.maxTokens ?? 16384,
-      stream: true,
-    };
+    const body = this.buildRequestBody(messages, options, 16384, true);
 
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
@@ -186,14 +238,7 @@ export class OpenAIProvider implements BaseProvider {
     const model = this.defaultModel;
     const startTime = Date.now();
 
-    const body: Record<string, unknown> = {
-      model,
-      messages: [
-        { role: 'system', content: options.systemPrompt },
-        ...messages.map(m => ({ role: m.role, content: m.content })),
-      ],
-      max_tokens: options.maxTokens ?? 8192,
-    };
+    const body = this.buildRequestBody(messages, options, 8192, false);
 
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',

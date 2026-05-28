@@ -94,7 +94,7 @@ Explain the project context Mythos must understand before editing files.
 | `force-provider` | optional | Force a provider for this skill, if configured |
 | `max-output-tokens` | optional | Cap output tokens for runs using this skill |
 | `timeout-ms` | optional | Request timeout cap for runs using this skill |
-| `requires-tools` | optional | Reserved for future tool-aware providers |
+| `requires-tools` | optional | Descriptive list of tool names the skill expects (shown in `mythos skills show`); informational only — it does not change model routing |
 | `incompatible-with` | optional | Skill names or ids that should not be used together |
 
 Example array fields:

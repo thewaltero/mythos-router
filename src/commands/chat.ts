@@ -68,7 +68,6 @@ class ChatSession {
   public forceProvider?: string;
   public allowFallback?: boolean;
   public timeoutMs?: number;
-  public requiresTools?: boolean;
   private ui: ChatUI;
   private activeSkills: Skill[] = [];
   private touchedFiles = new Set<string>();
@@ -93,13 +92,6 @@ class ChatSession {
       this.timeoutMs = skillResult.timeoutMs;
       this.activeSkills = skillResult.skills;
       budgetMultiplier = skillResult.budgetMultiplier;
-
-      // requiresTools is parsed but no providers implement tool_calling yet.
-      // Warn and neutralize so the orchestrator doesn't reject all providers.
-      if (skillResult.requiresTools) {
-        this.ui.warn('Skill declares requires-tools, but tool calling is not yet implemented. This field is reserved for future use.');
-        this.requiresTools = false;
-      }
 
       if (skillResult.skills.length > 0) {
         this.ui.divider();
@@ -256,7 +248,6 @@ class ChatSession {
           forceProvider: this.forceProvider,
           allowFallback: this.allowFallback,
           timeoutMs: this.timeoutMs,
-          requiresTools: this.requiresTools,
           onThinkingDelta: (delta) => {
             thinkingTokens += Math.ceil(delta.length / 4);
             this.ui.updateLoading(`Thinking... ${c.yellow}~${thinkingTokens} tokens${c.reset}`);
@@ -555,7 +546,6 @@ class ChatSession {
             forceProvider: this.forceProvider,
             allowFallback: this.allowFallback,
             timeoutMs: this.timeoutMs,
-            requiresTools: this.requiresTools,
             onThinkingDelta: () => { }, // simple spinner
             onTextDelta: (delta) => {
               if (!streamStarted) {
@@ -684,7 +674,6 @@ class ChatSession {
         forceProvider: this.forceProvider,
         allowFallback: this.allowFallback,
         timeoutMs: this.timeoutMs,
-        requiresTools: this.requiresTools,
         onThinkingDelta: () => { },
         onTextDelta: (delta) => {
           if (!streamStarted) {
