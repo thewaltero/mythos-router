@@ -3,7 +3,7 @@ import type { Readable, Writable } from 'node:stream';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { applyExternalAgentActions } from './commands/swd.js';
+import { applyExternalAgentActions, resolveSandboxChecks } from './commands/swd.js';
 import { formatReceiptMarkdown } from './receipt-markdown.js';
 import {
   listReceipts,
@@ -152,6 +152,15 @@ export const MCP_TOOLS: MCPTool[] = [
           type: 'boolean',
           description: 'Allow high-impact command-surface actions and deletes. Sensitive files remain blocked.',
         },
+        check: {
+          type: 'array',
+          description: 'Command(s) to run in an isolated copy before applying. Changes are applied only if every check passes. Same trust level as a shell command.',
+          items: { type: 'string' },
+        },
+        runChecks: {
+          type: 'boolean',
+          description: 'Run the checks declared in .mythos/policy.json in an isolated copy before applying. Declared checks never run unless this is true.',
+        },
         saveReceipt: {
           type: 'boolean',
           description: 'Write a local SWD receipt for successful non-dry-run applies. Defaults to true.',
@@ -296,6 +305,10 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   swd_apply: async (args) => {
     const rawInput = externalAgentInputFromArgs(args);
     const dryRun = optionalBoolean(args.dryRun, 'dryRun') ?? false;
+    const checks = dryRun ? [] : resolveSandboxChecks({
+      check: optionalStringArray(args.check, 'check'),
+      runChecks: optionalBoolean(args.runChecks, 'runChecks') ?? false,
+    });
     const output = await applyExternalAgentActions({
       rawInput,
       dryRun,
@@ -306,6 +319,7 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
       summary: optionalString(args.summary, 'summary'),
       agentId: optionalString(args.agentId, 'agentId'),
       modelId: optionalString(args.modelId, 'modelId'),
+      checks,
     });
     return toolResult(output, !output.ok);
   },
@@ -531,6 +545,14 @@ function optionalBoolean(value: unknown, name: string): boolean | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== 'boolean') throw new Error(`${name} must be a boolean.`);
   return value;
+}
+
+function optionalStringArray(value: unknown, name: string): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
+    throw new Error(`${name} must be an array of strings.`);
+  }
+  return value as string[];
 }
 
 function optionalRecord(value: unknown, name: string): Record<string, unknown> | undefined {

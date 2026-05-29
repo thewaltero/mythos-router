@@ -13,5 +13,9 @@
     "allowDeletes": false,
     "maxActions": 20,
     "maxActionContentBytes": 50000
-  }
+  },
+  "checks": [
+    { "name": "typecheck", "command": "npm run -s build" },
+    { "name": "test", "command": "npm test" }
+  ]
 }

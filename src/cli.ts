@@ -207,6 +207,8 @@ program
   .option('--no-rollback', 'Disable rollback on failed verification')
   .option('--no-receipt', 'Do not save a SWD receipt')
   .option('--allow-risky', 'Allow high-impact actions that normally require human confirmation; sensitive files remain blocked')
+  .option('--check <cmd...>', 'Run command(s) in an isolated copy before applying; apply only if all pass (repeatable)')
+  .option('--run-checks', 'Run the checks declared in .mythos/policy.json in an isolated copy before applying')
   .option('--request <text>', 'Receipt request label for external-agent runs')
   .option('--summary <text>', 'Receipt summary override')
   .option('--agent <id>', 'External agent identifier for receipts')
@@ -283,6 +285,7 @@ program
   .argument('[target]', 'receipt id or latest')
   .option('-n, --limit <n>', 'Number of receipts to show when listing', '10')
   .option('--json', 'Print machine-readable JSON')
+  .option('--format <format>', 'Output format for show/latest: json | markdown')
   .option('--markdown', 'Print a PR-ready Markdown receipt summary for show/latest')
   .option('--pr', 'Alias for --markdown')
   .action(receiptsCommand);

@@ -373,7 +373,7 @@ export interface TestResult {
   output: string;
 }
 
-export function runTestCommand(cmd: string, timeoutMs = 15000): Promise<TestResult> {
+export function runTestCommand(cmd: string, timeoutMs = 15000, cwd: string = process.cwd()): Promise<TestResult> {
   return new Promise((resolve) => {
     let finished = false;
     
@@ -383,7 +383,7 @@ export function runTestCommand(cmd: string, timeoutMs = 15000): Promise<TestResu
       resolve(result);
     };
 
-    const child = spawn(cmd, { shell: true, cwd: process.cwd() });
+    const child = spawn(cmd, { shell: true, cwd });
     let output = '';
     
     const timer = setTimeout(() => {

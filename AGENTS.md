@@ -14,6 +14,7 @@
 - `src/budget.ts` — Session budget limiter (token cap, turn cap, progress bar)
 - `src/swd.ts` — SWD execution kernel (engine, types, parsing, snapshots, verification, rollback)
 - `src/swd-cli.ts` — SWD terminal presentation layer (verification output, dry-run preview)
+- `src/sandbox.ts` — Isolated temp repo copy gate for external-agent checks before real writes
 - `src/receipts.ts` — SWD trust receipts (creation, storage, drift verification)
 - `src/memory.ts` — Self-healing MEMORY.md manager (SQLite FTS5 derivative index)
 - `src/metrics.ts` — Global metrics store (persistent budget tracking)
@@ -53,10 +54,16 @@
 - `.mythos/policy.json` is an enforced repo-local SWD policy. It can add blocks, confirmations, delete controls, operation allowlists, action batch limits, and write-size limits. Malformed policy files must fail closed.
 - `mythos mcp config [generic|claude|cursor]` prints client config only. It must not start the MCP server, write files, call a model, or open a port.
 - `mythos swd apply --stdin --json` is the model-free integration point for external/autonomous agents.
+- `mythos swd apply --check <cmd>` applies approved actions inside an isolated temp repo copy, runs the trusted check command there, and only applies the same actions to the real working tree if every check passes.
+- `mythos swd apply --run-checks` runs checks declared in `.mythos/policy.json` through the same isolated temp repo copy gate.
 - `mythos mcp` exposes the same boundary to MCP-compatible clients over stdio; it must not start a daemon, open a port, or duplicate SWD logic.
 - It must not require `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `DEEPSEEK_API_KEY`; the external agent brings its own model/key.
+- MCP `swd_apply` may receive `check` commands or `runChecks: true`; these must reuse the same `applyExternalAgentActions` / sandbox path as the CLI.
 - External SWD input must fail closed: reject oversized input, malformed JSON/actions, path traversal, sensitive paths, and high-impact command-surface changes unless explicitly allowed.
 - Sensitive files such as `.env`, `.npmrc`, private keys, wallet files, and `.git` internals must remain blocked by default.
+- Check commands are user-trusted shell commands, not an OS/container security sandbox. Never derive a check command from untrusted model output or arbitrary action content.
+- Policy-declared checks must never run merely because a policy file exists; they require explicit `--run-checks` or MCP `runChecks: true`.
+- `--dry-run` must never execute checks, mutate files, or write receipts.
 - Receipts for external-agent applies should record the external agent/model identity without leaking secrets.
 
 ## Budget Limiter Protocol
@@ -77,6 +84,8 @@ npx tsx src/cli.ts run "explain this repo architecture"
 npx tsx src/cli.ts run --file TASK.md
 npx tsx src/cli.ts run "fix the failing smoke test" --dry-run
 your-agent --emit-file-actions | npx tsx src/cli.ts swd apply --stdin --json
+your-agent --emit-file-actions | npx tsx src/cli.ts swd apply --stdin --json --check "npm test"
+your-agent --emit-file-actions | npx tsx src/cli.ts swd apply --stdin --json --run-checks
 npx tsx src/cli.ts mcp
 npx tsx src/cli.ts verify
 npx tsx src/cli.ts verify --dry-run

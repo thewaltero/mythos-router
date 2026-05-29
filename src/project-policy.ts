@@ -14,11 +14,17 @@ export interface ProjectPolicyLimits {
   allowedOperations?: ProjectPolicyOperation[];
 }
 
+export interface ProjectPolicyCheck {
+  name: string;
+  command: string;
+}
+
 export interface ProjectPolicy {
   version?: typeof PROJECT_POLICY_VERSION;
   block?: string[];
   confirm?: string[];
   limits?: ProjectPolicyLimits;
+  checks?: ProjectPolicyCheck[];
 }
 
 export interface ProjectPolicyState {
@@ -37,6 +43,9 @@ const VALID_OPERATIONS = new Set<ProjectPolicyOperation>(['CREATE', 'MODIFY', 'D
 const MAX_POLICY_PATTERNS = 200;
 const MAX_PATTERN_LENGTH = 240;
 const MAX_POLICY_ACTIONS = 500;
+const MAX_POLICY_CHECKS = 20;
+const MAX_CHECK_NAME_LENGTH = 60;
+const MAX_CHECK_COMMAND_LENGTH = 500;
 
 export const DEFAULT_PROJECT_POLICY: ProjectPolicy = {
   version: PROJECT_POLICY_VERSION,
@@ -172,6 +181,7 @@ function validateProjectPolicy(value: unknown): string[] {
 
   errors.push(...validatePatternList(value.block, 'block'));
   errors.push(...validatePatternList(value.confirm, 'confirm'));
+  errors.push(...validateChecks(value.checks));
 
   if (value.limits !== undefined) {
     if (!isRecord(value.limits)) {
@@ -197,6 +207,38 @@ function validatePatternList(value: unknown, key: 'block' | 'confirm'): string[]
     }
     if (pattern.length > MAX_PATTERN_LENGTH) {
       errors.push(`${key} pattern is too long: ${pattern.slice(0, 40)}...`);
+    }
+  }
+  return errors;
+}
+
+function validateChecks(value: unknown): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) return ['checks must be an array of { name, command } objects.'];
+  if (value.length > MAX_POLICY_CHECKS) return [`checks must contain ${MAX_POLICY_CHECKS} entries or fewer.`];
+
+  const errors: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (!isRecord(entry)) {
+      errors.push('each check must be an object with name and command.');
+      continue;
+    }
+    const name = entry.name;
+    const command = entry.command;
+    if (typeof name !== 'string' || name.trim().length === 0) {
+      errors.push('check.name must be a non-empty string.');
+    } else if (name.length > MAX_CHECK_NAME_LENGTH) {
+      errors.push(`check.name is too long: ${name.slice(0, 20)}...`);
+    } else if (seen.has(name.trim())) {
+      errors.push(`duplicate check name: ${name.trim()}`);
+    } else {
+      seen.add(name.trim());
+    }
+    if (typeof command !== 'string' || command.trim().length === 0) {
+      errors.push('check.command must be a non-empty string.');
+    } else if (command.length > MAX_CHECK_COMMAND_LENGTH) {
+      errors.push('check.command is too long.');
     }
   }
   return errors;
@@ -255,7 +297,18 @@ function normalizeProjectPolicy(policy: ProjectPolicy): ProjectPolicy {
     };
   }
 
+  if (policy.checks) {
+    normalized.checks = policy.checks.map((check) => ({
+      name: check.name.trim(),
+      command: check.command.trim(),
+    }));
+  }
+
   return normalized;
+}
+
+export function getDeclaredChecks(state: ProjectPolicyState): ProjectPolicyCheck[] {
+  return state.policy?.checks ?? [];
 }
 
 function normalizePatterns(patterns?: string[]): string[] {

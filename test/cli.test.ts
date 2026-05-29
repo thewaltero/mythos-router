@@ -289,6 +289,14 @@ describe('CLI Smoke Tests', () => {
       assert.equal(shown.files[0].path, filePath);
       assert.equal(shown.files[0].after.path, filePath);
 
+      const markdown = execFileSync(
+        process.execPath,
+        [cliPath, 'receipts', 'show', receipt.id, '--format', 'markdown'],
+        { cwd: tempDir, encoding: 'utf-8' },
+      );
+      assert.match(markdown, /### Mythos SWD Receipt/);
+      assert.match(markdown, new RegExp(receipt.id));
+
       const verified = JSON.parse(execFileSync(
         process.execPath,
         [cliPath, 'receipts', 'verify', receipt.id, '--json'],

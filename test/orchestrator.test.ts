@@ -151,3 +151,180 @@ describe('ProviderOrchestrator', () => {
     assert.equal(fallback.sendCalls, 0);
   });
 });
+
+const streamOptions: StreamOptions = { systemPrompt: 'test', effort: 'low' };
+
+describe('ProviderOrchestrator — selection & resilience', () => {
+  it('forceProvider selects the named provider even at lower priority', async () => {
+    const orchestrator = new ProviderOrchestrator(noopTelemetry);
+    const primary = new FakeProvider('primary');
+    const forced = new FakeProvider('forced');
+    orchestrator.registerProvider(primary, { priority: 0 });
+    orchestrator.registerProvider(forced, { priority: 5 });
+
+    const response = await orchestrator.sendMessage(messages, { ...sendOptions, forceProvider: 'forced' });
+
+    assert.equal(response.metadata.providerId, 'forced');
+    assert.equal(forced.sendCalls, 1);
+    assert.equal(primary.sendCalls, 0);
+  });
+
+  it('throws when forceProvider names an unavailable provider', async () => {
+    const orchestrator = new ProviderOrchestrator(noopTelemetry);
+    orchestrator.registerProvider(new FakeProvider('only'), { priority: 0 });
+
+    await assert.rejects(
+      () => orchestrator.sendMessage(messages, { ...sendOptions, forceProvider: 'ghost' }),
+      /not available/,
+    );
+  });
+
+  it('throws a clear error when no providers are registered', async () => {
+    const orchestrator = new ProviderOrchestrator(noopTelemetry);
+
+    await assert.rejects(
+      () => orchestrator.sendMessage(messages, sendOptions),
+      /No providers available/,
+    );
+  });
+
+  it('deterministic selection is stable across repeated calls', async () => {
+    const orchestrator = new ProviderOrchestrator(noopTelemetry);
+    orchestrator.registerProvider(new FakeProvider('det-a'), { priority: 0 });
+    orchestrator.registerProvider(new FakeProvider('det-b'), { priority: 1 });
+    orchestrator.registerProvider(new FakeProvider('det-c'), { priority: 2 });
+
+    const first = await orchestrator.sendMessage(messages, { ...sendOptions, deterministic: true });
+    const second = await orchestrator.sendMessage(messages, { ...sendOptions, deterministic: true });
+
+    assert.equal(first.metadata.providerId, second.metadata.providerId);
+  });
+
+  it('deterministic mode does not fall back on failure', async () => {
+    const orchestrator = new ProviderOrchestrator(noopTelemetry);
+    const failing = new FakeProvider('det-fail', ['streaming'], {
+      send: async () => {
+        throw new Error('bad request');
+      },
+    });
+    const other = new FakeProvider('det-other');
+    orchestrator.registerProvider(failing, { priority: 0 });
+    orchestrator.registerProvider(other, { priority: 1 });
+
+    await assert.rejects(
+      () => orchestrator.sendMessage(messages, { ...sendOptions, deterministic: true, forceProvider: 'det-fail' }),
+      /Deterministic mode/,
+    );
+    assert.equal(other.sendCalls, 0);
+  });
+
+  it('retries a retryable failure and then succeeds on the same provider', async () => {
+    let attempts = 0;
+    const flaky = new FakeProvider('flaky', ['streaming'], {
+      send: async () => {
+        attempts++;
+        if (attempts < 3) throw new Error('503 service unavailable');
+        return makeResponse('flaky');
+      },
+    });
+    const orchestrator = new ProviderOrchestrator(noopTelemetry);
+    orchestrator.registerProvider(flaky, { priority: 0 });
+
+    const response = await orchestrator.sendMessage(messages, sendOptions);
+
+    assert.equal(response.metadata.providerId, 'flaky');
+    assert.equal(attempts, 3); // two retryable failures, then success
+  });
+
+  it('does not retry a non-retryable failure before falling back', async () => {
+    let attempts = 0;
+    const failing = new FakeProvider('nonretry', ['streaming'], {
+      send: async () => {
+        attempts++;
+        throw new Error('invalid request');
+      },
+    });
+    const fallback = new FakeProvider('nr-fallback');
+    const orchestrator = new ProviderOrchestrator(noopTelemetry);
+    orchestrator.registerProvider(failing, { priority: 0 });
+    orchestrator.registerProvider(fallback, { priority: 1 });
+
+    const response = await orchestrator.sendMessage(messages, sendOptions);
+
+    assert.equal(response.metadata.providerId, 'nr-fallback');
+    assert.equal(attempts, 1); // non-retryable: a single attempt, no backoff retries
+  });
+
+  it('trips the circuit breaker after the consecutive retryable failure threshold', async () => {
+    const degradedUntilById = new Map<string, number>();
+    const telemetry = {
+      updateMetrics: (state: { id: string; degradedUntil: number }) => {
+        degradedUntilById.set(state.id, state.degradedUntil);
+      },
+      logDecision: () => {},
+      logFailure: () => {},
+    };
+    const orchestrator = new ProviderOrchestrator(telemetry);
+    const failing = new FakeProvider('cb', ['streaming'], {
+      send: async () => {
+        throw new Error('503 service unavailable');
+      },
+    });
+    orchestrator.registerProvider(failing, { priority: 0 });
+
+    // First exhausted retryable request: one consecutive failure, breaker stays closed.
+    await assert.rejects(
+      () => orchestrator.sendMessage(messages, { ...sendOptions, forceProvider: 'cb', allowFallback: false }),
+    );
+    assert.equal(degradedUntilById.get('cb') ?? 0, 0);
+
+    // Second exhausted retryable request: threshold reached, breaker trips.
+    await assert.rejects(
+      () => orchestrator.sendMessage(messages, { ...sendOptions, forceProvider: 'cb', allowFallback: false }),
+    );
+    assert.equal((degradedUntilById.get('cb') ?? 0) > 0, true);
+  });
+
+  it('releases the concurrency slot after a successful request', async () => {
+    const orchestrator = new ProviderOrchestrator(noopTelemetry);
+    orchestrator.registerProvider(new FakeProvider('conc-ok'), { priority: 0 });
+
+    await orchestrator.sendMessage(messages, sendOptions);
+    const slot = orchestrator.getProviderHealth().find((h) => h.id === 'conc-ok');
+
+    assert.equal(slot?.concurrency, 0);
+  });
+
+  it('excludes disabled providers from routing and provider count', async () => {
+    const orchestrator = new ProviderOrchestrator(noopTelemetry);
+    const disabled = new FakeProvider('disabled');
+    const active = new FakeProvider('active');
+    orchestrator.registerProvider(disabled, { priority: 0, enabled: false });
+    orchestrator.registerProvider(active, { priority: 1 });
+
+    const response = await orchestrator.sendMessage(messages, sendOptions);
+
+    assert.equal(response.metadata.providerId, 'active');
+    assert.equal(disabled.sendCalls, 0);
+    assert.equal(orchestrator.providerCount, 1);
+  });
+
+  it('falls back to the next provider on the streaming path', async () => {
+    const orchestrator = new ProviderOrchestrator(noopTelemetry);
+    const failing = new FakeProvider('stream-fail', ['streaming'], {
+      stream: async () => {
+        throw new Error('stream backend rejected');
+      },
+    });
+    const fallback = new FakeProvider('stream-ok');
+    orchestrator.registerProvider(failing, { priority: 0 });
+    orchestrator.registerProvider(fallback, { priority: 1 });
+
+    // Small watchdog so any timer left pending by the failed slot resolves fast.
+    const response = await orchestrator.streamMessage(messages, { ...streamOptions, timeoutMs: 100 });
+
+    assert.equal(response.metadata.providerId, 'stream-ok');
+    assert.equal(response.metadata.fallbackTriggered, true);
+    assert.equal(failing.streamCalls, 1);
+  });
+});

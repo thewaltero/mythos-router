@@ -2,8 +2,10 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { SWDEngine, parseActions, resolveSafePath, type FileAction, type SWDOptions, type SWDRunResult } from '../swd.js';
 import { reviewActions, type ActionRiskVerdict } from '../security-policy.js';
-import { createSWDReceipt, saveSWDReceipt, type ReceiptProvider } from '../receipts.js';
+import { createSWDReceipt, saveSWDReceipt, redactReceiptSecrets, type ReceiptProvider } from '../receipts.js';
 import { isGitRepo, getCurrentBranch, getLatestHash } from '../git.js';
+import { runActionsInSandbox, type SandboxCheck } from '../sandbox.js';
+import { loadProjectPolicy, getDeclaredChecks } from '../project-policy.js';
 import { c, error as logError, success as logSuccess, warn as logWarn } from '../utils.js';
 
 const MAX_AGENT_INPUT_BYTES = 1_000_000;
@@ -26,6 +28,21 @@ export interface RejectedAction {
   reason: string;
 }
 
+export interface SandboxCheckSummary {
+  name: string;
+  command: string;
+  passed: boolean;
+  outputTail: string;
+}
+
+export interface SandboxSummary {
+  ran: boolean;
+  ok: boolean;
+  checks: SandboxCheckSummary[];
+  filesCopied?: number;
+  setupError?: string;
+}
+
 export interface SWDApplyResult {
   ok: boolean;
   mode: 'apply' | 'dry-run';
@@ -41,6 +58,7 @@ export interface SWDApplyResult {
     id: string;
     model: string;
   };
+  sandbox?: SandboxSummary;
 }
 
 interface SWDCommandOptions {
@@ -56,6 +74,8 @@ interface SWDCommandOptions {
   summary?: string;
   agent?: string;
   model?: string;
+  check?: string[];
+  runChecks?: boolean;
 }
 
 interface ApplyExternalAgentOptions {
@@ -69,6 +89,8 @@ interface ApplyExternalAgentOptions {
   summary?: string;
   agentId?: string;
   modelId?: string;
+  checks?: SandboxCheck[];
+  checkTimeoutMs?: number;
 }
 
 function getReceiptGitContext(): { branch?: string; commit?: string } | undefined {
@@ -309,6 +331,55 @@ export async function applyExternalAgentActions(options: ApplyExternalAgentOptio
     };
   }
 
+    // ── Isolated-run gate ────────────────────────────────────────
+  // When checks are requested, apply the batch in a throwaway copy and run
+  // the checks there FIRST. If they fail, the real working tree is never
+  // touched (fail-closed). Checks never run during a dry-run, since dry-run
+  // must remain a pure, side-effect-free preview.
+  const checks = options.checks ?? [];
+  let sandboxSummary: SandboxSummary | undefined;
+  if (!dryRun && checks.length > 0 && approved.length > 0) {
+    const sandboxResult = await runActionsInSandbox(approved, {
+      checks,
+      checkTimeoutMs: options.checkTimeoutMs,
+    });
+    sandboxSummary = {
+      ran: true,
+      ok: sandboxResult.ok,
+      checks: sandboxResult.checks.map((check) => ({
+        name: check.name,
+        command: check.command,
+        passed: check.passed,
+        outputTail: redactReceiptSecrets(check.outputTail),
+      })),
+      filesCopied: sandboxResult.filesCopied,
+      setupError: sandboxResult.setupError ? redactReceiptSecrets(sandboxResult.setupError) : undefined,
+    };
+
+    if (!sandboxResult.ok) {
+      const failureMessages = [
+        ...sandboxSummary.checks.filter((check) => !check.passed).map((check) => `Sandbox check failed: ${check.name}`),
+        ...(sandboxSummary.setupError ? [`Sandbox setup failed: ${sandboxSummary.setupError}`] : []),
+      ];
+      return {
+        ok: false,
+        mode: 'apply',
+        actionCount: actions.length,
+        approvedCount: approved.length,
+        rejected,
+        result: {
+          success: false,
+          results: [],
+          rolledBack: false,
+          rollbackErrors: [],
+          errors: failureMessages.length > 0 ? failureMessages : ['Sandbox checks did not pass.'],
+        },
+        agent: { id: agentId, model: modelId },
+        sandbox: sandboxSummary,
+      };
+    }
+  }
+
   const engineOptions: SWDOptions = {
     dryRun,
     strict: options.strict ?? true,
@@ -333,6 +404,8 @@ export async function applyExternalAgentActions(options: ApplyExternalAgentOptio
     result,
     agent: { id: agentId, model: modelId },
   };
+
+  if (sandboxSummary) output.sandbox = sandboxSummary;
 
   if (saveReceipt) {
     const request = options.request ?? input.request ?? `external-agent:${agentId}:${sha256(options.rawInput).slice(0, 12)}`;
@@ -392,6 +465,18 @@ function printHumanResult(output: SWDApplyResult): void {
     }
   }
 
+  if (output.sandbox?.ran) {
+    const verb = output.sandbox.ok ? `${c.green}passed${c.reset}` : `${c.red}failed${c.reset}`;
+    console.log(`${c.dim}Isolated run:${c.reset} checks ${verb} ${c.dim}(${output.sandbox.filesCopied ?? 0} files mirrored)${c.reset}`);
+    for (const check of output.sandbox.checks) {
+      const mark = check.passed ? `${c.green}✔${c.reset}` : `${c.red}✗${c.reset}`;
+      console.log(`  ${mark} ${check.name} ${c.dim}(${check.command})${c.reset}`);
+    }
+    if (output.sandbox.setupError) {
+      logError(`Sandbox setup failed: ${output.sandbox.setupError}`);
+    }
+  }
+
   for (const result of output.result.results) {
     const ok = result.status === 'verified' || result.status === 'noop';
     const prefix = ok ? `${c.green}✔${c.reset}` : `${c.red}✗${c.reset}`;
@@ -410,6 +495,28 @@ function printHumanResult(output: SWDApplyResult): void {
   }
 }
 
+export function resolveSandboxChecks(options: Pick<SWDCommandOptions, 'check' | 'runChecks'>): SandboxCheck[] {
+  const checks: SandboxCheck[] = [];
+
+  const adHoc = Array.isArray(options.check) ? options.check : [];
+  adHoc.forEach((command, index) => {
+    const trimmed = typeof command === 'string' ? command.trim() : '';
+    if (trimmed.length > 0) checks.push({ name: `check-${index + 1}`, command: trimmed });
+  });
+
+  if (options.runChecks) {
+    const policy = loadProjectPolicy();
+    if (policy.errors.length > 0) {
+      throw new Error(`Cannot run declared checks: ${policy.errors.join('; ')}`);
+    }
+    for (const declared of getDeclaredChecks(policy)) {
+      checks.push({ name: declared.name, command: declared.command });
+    }
+  }
+
+  return checks;
+}
+
 export async function swdCommand(action = 'apply', options: SWDCommandOptions): Promise<void> {
   if (action !== 'apply') {
     const message = `Unknown swd action "${action}". Supported: apply.`;
@@ -421,17 +528,22 @@ export async function swdCommand(action = 'apply', options: SWDCommandOptions): 
 
   try {
     const rawInput = await resolveInput(options);
+    const checks = resolveSandboxChecks(options);
+    if (checks.length > 0 && options.dryRun) {
+      logWarn('Checks are skipped in --dry-run (no commands are executed during a preview).');
+    }
     const result = await applyExternalAgentActions({
       rawInput,
       dryRun: options.dryRun ?? false,
       strict: options.strict ?? true,
       enableRollback: options.rollback ?? true,
-      saveReceipt: options.receipt ?? !options.dryRun,
+      saveReceipt: options.dryRun ? false : options.receipt ?? true,
       allowRisky: options.allowRisky ?? false,
       request: options.request,
       summary: options.summary,
       agentId: options.agent,
       modelId: options.model,
+      checks,
     });
 
     if (options.json) {

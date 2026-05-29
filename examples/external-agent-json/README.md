@@ -33,6 +33,19 @@ mythos receipts show latest --markdown
 mythos receipts verify latest --json
 ```
 
+## Isolated Run (apply only if checks pass)
+
+```bash
+mythos swd apply --file actions.json --json --check "npm test"
+```
+
+Expected behavior:
+
+- applies the actions in a throwaway copy of the project
+- runs the check(s) there
+- promotes the change to the real tree only if every check passes
+- on failure, returns `ok: false` and leaves the real tree untouched
+
 Expected behavior:
 
 - creates `agent-output.md`

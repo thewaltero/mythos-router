@@ -52,3 +52,30 @@ Expected behavior:
 - returns `ok: false`
 - reports that project policy blocked the write
 - does not write `contracts/mainnet/Vault.sol`
+
+## Isolated-Run Checks (opt-in)
+
+The example policy also declares verification commands under `checks`:
+
+```json
+"checks": [
+  { "name": "typecheck", "command": "npm run -s build" },
+  { "name": "test", "command": "npm test" }
+]
+```
+
+**Declaring a check never runs it.** Checks execute only when you opt in,
+in a throwaway copy of the project. The change reaches the real working
+tree only if every check passes:
+
+```bash
+# Run the policy-declared checks before applying
+mythos swd apply --file actions.json --json --run-checks
+
+# Or pass ad-hoc checks without a policy file (repeatable)
+mythos swd apply --file actions.json --json --check "npm test"
+```
+
+If any check fails, the apply is rejected and the real tree is untouched.
+Checks are skipped during `--dry-run`. This keeps a cloned untrusted repo's
+policy file from triggering command execution on its own.

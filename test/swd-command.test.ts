@@ -57,6 +57,95 @@ created through cli
     }
   });
 
+  it('does not save receipts for CLI dry-runs by default', () => {
+    const repoRoot = process.cwd();
+    const tempDir = mkdtempSync(join(tmpdir(), 'mythos-swd-dry-no-receipt-'));
+    const cliPath = join(repoRoot, 'src', 'cli.ts');
+    const tsxLoader = pathToFileURL(join(repoRoot, 'node_modules', 'tsx', 'dist', 'loader.mjs')).href;
+    const input = JSON.stringify({
+      actions: [{ path: 'dry.txt', operation: 'CREATE', content: 'dry\n', description: 'dry create' }],
+    });
+
+    try {
+      const output = execFileSync(
+        process.execPath,
+        ['--import', tsxLoader, cliPath, 'swd', 'apply', '--stdin', '--dry-run', '--json'],
+        { cwd: tempDir, input, encoding: 'utf-8' },
+      );
+      const parsed = JSON.parse(output);
+
+      assert.equal(parsed.ok, true);
+      assert.equal(parsed.mode, 'dry-run');
+      assert.equal(parsed.receipt, undefined);
+      assert.equal(existsSync(join(tempDir, 'dry.txt')), false);
+      assert.equal(existsSync(join(tempDir, '.mythos', 'receipts')), false);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('applies when an isolated --check passes and records the sandbox result', () => {
+    const repoRoot = process.cwd();
+    const tempDir = mkdtempSync(join(tmpdir(), 'mythos-swd-check-ok-'));
+    const cliPath = join(repoRoot, 'src', 'cli.ts');
+    const tsxLoader = pathToFileURL(join(repoRoot, 'node_modules', 'tsx', 'dist', 'loader.mjs')).href;
+    const input = JSON.stringify({
+      actions: [{ path: 'gated.txt', operation: 'CREATE', content: 'gated\n', description: 'gated create' }],
+    });
+
+    try {
+      const output = execFileSync(
+        process.execPath,
+        ['--import', tsxLoader, cliPath, 'swd', 'apply', '--stdin', '--json', '--no-receipt', '--check', 'exit 0'],
+        { cwd: tempDir, input, encoding: 'utf-8' },
+      );
+      const parsed = JSON.parse(output);
+
+      assert.equal(parsed.ok, true);
+      assert.equal(parsed.sandbox.ran, true);
+      assert.equal(parsed.sandbox.ok, true);
+      assert.equal(parsed.sandbox.checks[0].passed, true);
+      // The file is written to the REAL tree only after checks pass.
+      assert.equal(readFileSync(join(tempDir, 'gated.txt'), 'utf-8'), 'gated\n');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does NOT touch the real tree when an isolated --check fails', () => {
+    const repoRoot = process.cwd();
+    const tempDir = mkdtempSync(join(tmpdir(), 'mythos-swd-check-fail-'));
+    const cliPath = join(repoRoot, 'src', 'cli.ts');
+    const tsxLoader = pathToFileURL(join(repoRoot, 'node_modules', 'tsx', 'dist', 'loader.mjs')).href;
+    const input = JSON.stringify({
+      actions: [{ path: 'should-not-exist.txt', operation: 'CREATE', content: 'nope\n', description: 'gated create' }],
+    });
+
+    try {
+      let stdout = '';
+      try {
+        stdout = execFileSync(
+          process.execPath,
+          ['--import', tsxLoader, cliPath, 'swd', 'apply', '--stdin', '--json', '--no-receipt', '--check', 'exit 7'],
+          { cwd: tempDir, input, encoding: 'utf-8' },
+        );
+        assert.fail('failed checks should exit non-zero');
+      } catch (err: any) {
+        stdout = err.stdout;
+        assert.equal(err.status, 1);
+      }
+
+      const parsed = JSON.parse(stdout);
+      assert.equal(parsed.ok, false);
+      assert.equal(parsed.sandbox.ok, false);
+      assert.equal(parsed.sandbox.checks[0].passed, false);
+      // Fail-closed: the real working tree was never modified.
+      assert.equal(existsSync(join(tempDir, 'should-not-exist.txt')), false);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('returns machine-readable failure for blocked sensitive files', () => {
     const repoRoot = process.cwd();
     const tempDir = mkdtempSync(join(tmpdir(), 'mythos-swd-cli-block-'));

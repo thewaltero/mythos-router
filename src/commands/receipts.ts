@@ -12,6 +12,7 @@ import { c, error, heading, hr, info, success, theme, warn } from '../utils.js';
 interface ReceiptsOptions {
   limit?: string;
   json?: boolean;
+  format?: string;
   markdown?: boolean;
   pr?: boolean;
 }
@@ -22,9 +23,14 @@ export async function receiptsCommand(
   options: ReceiptsOptions = {},
 ): Promise<void> {
   const normalizedAction = (action ?? 'list').toLowerCase();
+  if (options.format && options.format !== 'json' && options.format !== 'markdown') {
+    error('Receipt format must be json or markdown.');
+    process.exitCode = 1;
+    return;
+  }
 
   if (normalizedAction === 'list') {
-    printReceiptList(parseLimit(options.limit), options.json);
+    printReceiptList(parseLimit(options.limit), wantsJson(options));
     return;
   }
 
@@ -39,12 +45,12 @@ export async function receiptsCommand(
   }
 
   if (normalizedAction === 'verify') {
-    printReceiptVerification(target ?? 'latest', options.json);
+    printReceiptVerification(target ?? 'latest', wantsJson(options));
     return;
   }
 
   warn(`Unknown receipts action: ${normalizedAction}`);
-  info('Usage: mythos receipts | mythos receipts show latest [--markdown] | mythos receipts verify latest');
+  info('Usage: mythos receipts | mythos receipts show latest [--markdown|--format markdown] | mythos receipts verify latest');
 }
 
 function printReceiptList(limit: number, asJson?: boolean): void {
@@ -83,12 +89,12 @@ function printReceipt(target: string, options: ReceiptsOptions = {}): void {
     return;
   }
 
-  if (options.json) {
+  if (wantsJson(options)) {
     console.log(JSON.stringify(receipt, null, 2));
     return;
   }
 
-  if (options.markdown || options.pr) {
+  if (wantsMarkdown(options)) {
     console.log(formatReceiptMarkdown(receipt));
     return;
   }
@@ -181,6 +187,14 @@ function printReceiptHeader(receipt: SWDReceipt): void {
 function formatStatus(receipt: ReceiptSummary): string {
   if (receipt.rolledBack) return `${theme.warning}ROLLBACK${c.reset}`;
   return receipt.success ? `${theme.success}VERIFIED${c.reset}` : `${theme.warning}ISSUES${c.reset}`;
+}
+
+function wantsJson(options: ReceiptsOptions): boolean {
+  return options.json === true || options.format === 'json';
+}
+
+function wantsMarkdown(options: ReceiptsOptions): boolean {
+  return options.markdown === true || options.pr === true || options.format === 'markdown';
 }
 
 function formatDate(timestamp: string): string {

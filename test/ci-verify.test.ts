@@ -10,7 +10,10 @@ import { createSWDReceipt, saveSWDReceipt } from '../src/receipts.js';
 import type { SWDRunResult } from '../src/swd.js';
 
 function git(cwd: string, args: string[]): void {
-  execFileSync('git', args, { cwd, stdio: 'ignore' });
+  execFileSync('git', ['-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', ...args], {
+    cwd,
+    stdio: 'ignore',
+  });
 }
 
 function makeRepo(): string {

@@ -60,6 +60,7 @@ Zero slop. Zero hallucinated state. Full adaptive thinking.
 |  **Deterministic Caching** | SQLite-backed caching for reasoning (SDK only) *(Node 22+)* |
 |  **Adaptive Thinking** | Opus 4.7 with configurable effort levels (high/medium/low) |
 |  **Strict Write Discipline** | Pre/post filesystem snapshots verify every model or external-agent file claim |
+|  **Isolated Runs** | `swd apply --check <cmd>` / `--run-checks` test a batch in a throwaway copy and apply it to the real tree only if checks pass — the real tree is never left broken |
 |  **SWD Receipts** | Per-run trust receipts record touched files, hashes, provider/external-agent id, budget, git state, and verification result |
 |  **Project Policy** | `.mythos/policy.json` adds enforced repo-local SWD guardrails for sensitive project surfaces |
 |  **Self-Healing Memory** | Authority-based logging with a rebuildable SQLite FTS5 search index *(Node 22+)* |
@@ -286,11 +287,21 @@ cat actions.json | mythos swd apply --stdin --json --agent python-agent --model 
 # Preview without touching disk or writing receipts
 cat actions.json | mythos swd apply --stdin --dry-run --json
 
+# Gate the apply behind a trusted check in an isolated temp repo copy
+cat actions.json | mythos swd apply --stdin --json --check "npm test"
+
+# Run checks declared in .mythos/policy.json before applying
+cat actions.json | mythos swd apply --stdin --json --run-checks
+
 # High-impact files such as package.json require explicit opt-in; sensitive files stay blocked
 cat actions.json | mythos swd apply --stdin --allow-risky --json
 ```
 
 `swd apply` is the model-free external-agent interface. It does **not** call Anthropic, OpenAI, DeepSeek, or any other model provider. Your agent keeps its own model key and only hands Mythos structured file actions. Mythos then applies Strict Write Discipline: path validation, security-policy review, pre/post snapshots, hash verification, rollback on failed verification, and local SWD receipts for successful non-dry-run applies.
+
+When `--check` or `--run-checks` is used, Mythos adds an isolated pre-apply gate. It mirrors the current project into a throwaway temp repo copy, applies the approved actions inside that copy, runs the requested checks there, and only then applies the same actions to the real working tree through SWD. If the temp copy cannot be prepared or any check fails, the real working tree is left untouched.
+
+This is an isolated workspace gate, not an OS or container sandbox. Check commands are trusted shell commands supplied by the user or explicitly enabled from project policy, and they run with the local user's permissions. Use commands you already trust, such as `npm test`, `npm run build`, `npm run lint`, or `npx tsc --noEmit`. `--dry-run` never executes checks.
 
 Accepted input formats:
 
@@ -327,8 +338,11 @@ Security defaults:
 - external JSON paths must be safe project-relative paths
 - `.env`, private keys, wallet files, `.git`, `.npmrc`, and secrets paths are blocked
 - deletes and command-surface files require `--allow-risky`
-- `.mythos/policy.json` can add repo-specific blocks, confirmations, operation limits, and batch limits
+- `.mythos/policy.json` can add repo-specific blocks, confirmations, operation limits, batch limits, and opt-in checks
+- `--check` and `--run-checks` run checks in a temp repo copy before the real tree is touched
+- check commands are caller-trusted shell commands, not an OS/container security sandbox
 - dry-runs do not write files or receipts
+- dry-runs do not execute checks
 - receipts record the external agent/model as `external:<agent-id>`
 
 ### `.mythos/policy.json` - Project Safety Policy
@@ -343,11 +357,17 @@ Security defaults:
     "maxActions": 25,
     "maxActionContentBytes": 120000,
     "allowedOperations": ["CREATE", "MODIFY", "READ"]
-  }
+  },
+  "checks": [
+    { "name": "build", "command": "npm run build" },
+    { "name": "test", "command": "npm test" }
+  ]
 }
 ```
 
-Project policy is an enforced SWD guardrail, not a prompt hint. It applies to `chat`, `run`, `swd apply`, and MCP `swd_apply`. Built-in sensitive path protection still wins, so policy files cannot allow `.env`, private keys, wallet files, `.git`, or `.npmrc`. `block` patterns fail closed, `confirm` patterns require human approval or explicit `--allow-risky` in external-agent flows, and malformed policy files block writes until fixed.
+Project policy is an enforced SWD guardrail, not a prompt hint. Its block/confirm/limit rules apply to `chat`, `run`, `swd apply`, and MCP `swd_apply`. Built-in sensitive path protection still wins, so policy files cannot allow `.env`, private keys, wallet files, `.git`, or `.npmrc`. `block` patterns fail closed, `confirm` patterns require human approval or explicit `--allow-risky` in external-agent flows, and malformed policy files block writes until fixed.
+
+Policy `checks` are different from path rules: declaring them does not execute anything. They run only when `mythos swd apply --run-checks` is passed, or when an MCP client calls `swd_apply` with `runChecks: true`. Checks run in the same isolated temp repo copy as ad-hoc `--check` commands, and failed checks prevent writes from reaching the real working tree.
 
 ### `mythos mcp` — MCP Adapter for SWD
 
@@ -381,7 +401,7 @@ Exposed tools:
 | Tool | Behavior |
 |------|----------|
 | `swd_dry_run` | Validates external-agent file actions without writing files or receipts |
-| `swd_apply` | Applies external-agent file actions through SWD, verifies disk state, rolls back failures, and writes receipts by default |
+| `swd_apply` | Applies external-agent file actions through SWD, can gate writes behind isolated checks, verifies disk state, rolls back failures, and writes receipts by default |
 | `receipts_list` | Lists recent local SWD receipts |
 | `receipts_show` | Reads a receipt by id, file path, or `latest`; pass `format: "markdown"` for PR-ready text |
 | `receipts_verify` | Re-checks current files and receipt integrity |
@@ -396,11 +416,12 @@ The mutating MCP tool is still guarded by the same external-agent SWD policy as 
 mythos receipts              # List recent SWD receipts
 mythos receipts show latest  # Inspect the newest receipt
 mythos receipts show latest --markdown  # PR-ready Markdown summary
+mythos receipts show latest --format markdown  # Same output, useful for tooling parity with MCP
 mythos receipts verify latest  # Re-check current files against receipt hashes
 mythos receipts --json       # Machine-readable output for tooling
 ```
 
-Every non-dry-run SWD file operation writes a local receipt to `.mythos/receipts/`. Receipts include the request summary, provider or external-agent/model identity, git branch/commit, per-file before/after hashes, rollback status, and verification errors. Built-in `chat`/`run` receipts also include token usage, budget snapshot, active skill packs, and optional `--test-cmd` result. `verify` turns those receipts into a quick drift check for "did the files still match what SWD verified?" `--markdown` (or `--pr`) prints a compact paste-ready receipt summary for PR reviews, especially useful when a write failed or rolled back. Receipts are local by default and gitignored by default. They may include prompts, file paths, provider metadata, skill names, test command names, and a short test output tail. Do not publish raw receipts from private repositories; force-add only when you intentionally want a shared audit trail.
+Every non-dry-run SWD file operation writes a local receipt to `.mythos/receipts/`. Receipts include the request summary, provider or external-agent/model identity, git branch/commit, per-file before/after hashes, rollback status, and verification errors. Built-in `chat`/`run` receipts also include token usage, budget snapshot, active skill packs, and optional `--test-cmd` result. `verify` turns those receipts into a quick drift check for "did the files still match what SWD verified?" `--markdown`, `--pr`, or `--format markdown` prints a compact paste-ready receipt summary for PR reviews, especially useful when a write failed or rolled back. Receipts are local by default and gitignored by default. They may include prompts, file paths, provider metadata, skill names, test command names, and a short test output tail. Do not publish raw receipts from private repositories; force-add only when you intentionally want a shared audit trail.
 
 ### `mythos verify` — Local Memory Scan + CI Verification
 
@@ -510,6 +531,7 @@ mythos-router/
 │   ├── budget.ts        # Session budget limiter (token cap, turn cap, progress bar)
 │   ├── swd.ts           # SWD execution kernel (engine, types, parsing, snapshots)
 │   ├── swd-cli.ts       # SWD terminal presentation (verification output, dry-run)
+│   ├── sandbox.ts       # Isolated temp repo copy gate for external-agent checks
 │   ├── receipts.ts      # SWD trust receipt creation, storage, and verification
 │   ├── skills.ts        # Project-local and user-global SKILL.md packs
 │   ├── learn.ts         # Deterministic repo skill generator
