@@ -13,3 +13,6 @@ memory.db-shm
 
 # Local SWD trust receipts (may include prompts and provider metadata)
 .mythos/receipts/
+
+# Local external-agent run history (may include paths, checks, and agent metadata)
+.mythos/runs/
