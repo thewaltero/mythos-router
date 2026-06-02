@@ -384,11 +384,16 @@ export class ProviderOrchestrator {
       // Acquire concurrency slot
       slot.activeConcurrency++;
 
+      // Hoisted above the try so the finally can always clear it. If it stayed
+      // inside the try, a throw from retryWithBackoff would leave the timer
+      // armed (the catch is out of the try block's scope), leaking a setTimeout
+      // that fires later and aborts an abandoned controller.
+      let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
+
       try {
         // Set up the adaptive watchdog
         const watchdogMs = options.timeoutMs ?? this.getWatchdogTimeout(slot);
         const watchdogController = new AbortController();
-        let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
         let lastChunkTime = Date.now();
 
         // Create a composite abort signal
@@ -403,6 +408,8 @@ export class ProviderOrchestrator {
           watchdogTimer = setTimeout(() => {
             watchdogController.abort();
           }, watchdogMs);
+          // Defense in depth: never let a stray watchdog hold the event loop open.
+          watchdogTimer.unref?.();
         };
         resetWatchdog();
 
@@ -513,6 +520,9 @@ export class ProviderOrchestrator {
         // Single owner of concurrency release — runs exactly once
         // regardless of success (return) or failure (continue)
         slot.activeConcurrency--;
+        // Always clear the watchdog, including the throw/continue path where
+        // the success-path clear above is skipped.
+        if (watchdogTimer) clearTimeout(watchdogTimer);
       }
     }
 

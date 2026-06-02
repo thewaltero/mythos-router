@@ -19,8 +19,9 @@
 
 ### Orchestrator complexity surface area
 - **Component**: `orchestrator.ts`
-- **Behavior under scale**: Routing logic includes scoring, fallback chains, and circuit breaker logic without automated coverage
-- **Consideration**: Increases refactor risk and onboarding cost for external contributors
+- **Status**: Core routing paths — scoring/deterministic selection, fallback chains, circuit-breaker tripping, retry backoff, and concurrency release — are now covered by `test/orchestrator.test.ts`.
+- **Behavior under scale**: Remaining concern is complexity itself (EMA scoring, watchdog, composite signals), not missing coverage
+- **Consideration**: Still increases refactor risk and onboarding cost for external contributors
 - **Revisit when**: Orchestrator becomes a stable external SDK dependency or undergoes major refactor
 
 ### Concurrent execution safety

@@ -2,25 +2,19 @@
 <img src="assets/banner.png" alt="Mythos Router Banner" width="864" />
 
 [![CodeQL](https://github.com/thewaltero/mythos-router/actions/workflows/github-code-scanning/codeql/badge.svg?branch=main)](https://github.com/thewaltero/mythos-router/actions/workflows/github-code-scanning/codeql)
-[![npm](https://img.shields.io/npm/v/mythos-router?style=flat-square&color=cc785c)](https://www.npmjs.com/package/mythos-router)
 [![Node.js](https://img.shields.io/badge/Node.js-20+-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://typescriptlang.org)
-[![Claude](https://img.shields.io/badge/Claude-Opus_4.7-cc785c?style=flat-square)](https://anthropic.com)
-[![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](./LICENSE)
+[![Claude](https://img.shields.io/badge/Claude-Opus_4.8-cc785c?style=flat-square)](https://anthropic.com)
+[![$MYTHOS on Uniswap](https://img.shields.io/badge/%24MYTHOS-on_Uniswap-cc785c?style=flat-square&labelColor=1a1a2e)](https://app.uniswap.org/swap?outputCurrency=0xb942b75a602fa318ac091370d93d9143ba345ba3&chain=base)
 [![GitHub stars](https://img.shields.io/github/stars/thewaltero/mythos-router?style=social)](https://github.com/thewaltero/mythos-router)
 
 
-## Claude Opus 4.7 · Strict Write Discipline · Zero Slop
+## Claude Opus 4.8 · Strict Write Discipline · Zero Slop
 **A local CLI power tool for verifiable AI-assisted coding.**
 
 
 [What is this?](#what-is-this) • [Features](#features) • [Installation](#installation) • [Examples](#integration-examples) • [Usage](#usage) • [Architecture](#architecture) • [Token Budget](#token-usage--budget) • [SDK](#-sdk-usage-for-agentic-systems) • [SWD Protocol](#the-swd-protocol)
 
-
----
-
-### Support the project
-**CA: `0xb942b75a602fa318ac091370d93d9143ba345ba3` ([$MYTHOS Token](https://app.uniswap.org/swap?outputCurrency=0xb942b75a602fa318ac091370d93d9143ba345ba3&chain=base))**
 
 ---
 
@@ -40,7 +34,7 @@ npx mythos-router chat
 
 ## What is this?
 
-**mythos-router** is a local CLI power tool that wraps Claude Opus 4.7 with a custom verification protocol called **Strict Write Discipline (SWD)**.
+**mythos-router** is a local CLI power tool that wraps Claude Opus 4.8 with a custom verification protocol called **Strict Write Discipline (SWD)**.
 
 Unlike standard Claude wrappers, mythos-router enforces filesystem verification: every file operation the AI claims to perform is *checked against the actual filesystem using SHA-256 snapshots*. If the model's claim doesn't match reality, it gets a Correction Turn. If it fails twice, it yields to the human.
 
@@ -58,7 +52,7 @@ Zero slop. Zero hallucinated state. Full adaptive thinking.
 |  **Multi-Provider BYOK** | Auto-routes between configured Anthropic, DeepSeek, and OpenAI keys with circuit breakers; Anthropic is no longer required when another provider is configured |
 |  **Verified Skill Packs** | Load project-local or user-global `SKILL.md` rules with `-s <name>`; active skills are recorded in SWD receipts |
 |  **Deterministic Caching** | SQLite-backed caching for reasoning (SDK only) *(Node 22+)* |
-|  **Adaptive Thinking** | Opus 4.7 with configurable effort levels (high/medium/low) |
+|  **Adaptive Thinking** | Opus 4.8 with configurable effort levels (high/medium/low) |
 |  **Strict Write Discipline** | Pre/post filesystem snapshots verify every model or external-agent file claim |
 |  **Isolated Runs** | `swd apply --check <cmd>` / `--run-checks` test a batch in a throwaway copy and apply it to the real tree only if checks pass — the real tree is never left broken |
 |  **SWD Receipts** | Per-run trust receipts record touched files, hashes, provider/external-agent id, budget, git state, and verification result |
@@ -87,7 +81,7 @@ Choose the right model for the job via the `--effort` flag:
 
 | Effort | Model | Best For |
 |--------|-------|----------|
-|  `high` (default) | Claude Opus 4.7 | Architecture, deep reasoning, complex refactors |
+|  `high` (default) | Claude Opus 4.8 | Architecture, deep reasoning, complex refactors |
 |  `medium` | Claude Sonnet 4.6 | Balanced code generation, everyday tasks |
 |  `low` | Claude Haiku 4.5 | Quick answers, memory compression, verification |
 
@@ -216,7 +210,7 @@ mythos run "refactor provider scoring" --branch provider-score
 ### `mythos chat` — Interactive Session
 
 ```bash
-mythos chat                  # Full power (high effort, Opus 4.7)
+mythos chat                  # Full power (high effort, Opus 4.8)
 mythos chat -s repo          # Load a project-local skill pack
 mythos chat --test-cmd "npm test" # Enable autonomous test-driven self-healing
 mythos chat --provider openai # Force a configured BYOK provider
@@ -574,7 +568,7 @@ mythos-router/
 User Input
     │
     ▼
-[Claude Opus 4.7] ── adaptive thinking
+[Claude Opus 4.8] ── adaptive thinking
     │
     ▼
 [Parse FILE_ACTION blocks] ── extract claimed operations
@@ -626,21 +620,16 @@ This is a deliberate design choice, not a missing feature. Mythos asks the model
 
 ## Token Usage & Budget
 
-### Opus 4.7 Pricing (as of 2026-05)
+### Opus 4.8 Pricing (as of 2026-05)
 
 | Rate | USD |
 |------|-----|
 | Input tokens | $5.00 / 1M tokens |
 | Output tokens | $25.00 / 1M tokens |
 
-> ** Tokenizer Cost Inflation Alert**
-> While the per-token price remains identical to Opus 4.6, **Opus 4.7 uses a new tokenizer that is significantly less efficient for Latin scripts**. 
-> - English prompts require **~59% more tokens** (85 → 135 tokens per paragraph).
-> - French requires **~34% more tokens**.
-> - Mixed multilingual codebases effectively cost **~22% more**.
-> - CJK languages (Chinese/Japanese/Korean) and code (Python) see smaller regressions (+4-21%).
-> 
-> *Bottom line: Expect your English-heavy mythos-router sessions to cost up to 59% more with Opus 4.7 than they did with 4.6, simply due to tokenizer changes.*
+> **Tokenizer note**
+> Opus 4.8 keeps the same rate card *and* the same tokenizer as Opus 4.7 — upgrading from 4.7 does not change your effective token counts or your bill.
+> The tokenizer change happened earlier, at the 4.6 → 4.7 boundary, where Latin-script text became somewhat less token-efficient. If you pin an older model (e.g. `MYTHOS_ANTHROPIC_MODEL_HIGH=claude-opus-4-6`) and later move up, expect a modest increase in effective tokens on English-heavy input. Actual impact depends entirely on your content — rely on your provider's billing dashboard for exact figures.
 
 > **Note on token accounting:** Mythos reports the **real token usage returned by the provider API** whenever it is available. When a provider does not return usage (e.g. some streaming responses), Mythos falls back to a rough `characters / 4` estimate purely to drive the in-session budget bar — it is a guardrail, not an exact tokenizer. Treat the displayed cost figures as estimates and rely on your provider's billing dashboard for exact charges.
 
@@ -648,7 +637,7 @@ This is a deliberate design choice, not a missing feature. Mythos asks the model
 
 | Mode | Typical Cost Per Turn |
 |------|----------------------|
-| `--effort high` | Full Opus 4.7 pricing (deep reasoning) |
+| `--effort high` | Full Opus 4.8 pricing (deep reasoning) |
 | `--effort medium` | Balanced — good for most tasks |
 | `--effort low` | Minimal thinking — quick answers |
 | `dream` | Low effort summarization (~500 tokens) |
@@ -697,5 +686,9 @@ MIT
 ## Disclaimer
 
 This project is an independent open-source tool built on top of the Anthropic API. It is not affiliated with or endorsed by Anthropic.
+
+<div align="center">
+<sub>Support development · <a href="https://app.uniswap.org/swap?outputCurrency=0xb942b75a602fa318ac091370d93d9143ba345ba3&chain=base">$MYTHOS</a> on Base · <code>0xb942b75a602fa318ac091370d93d9143ba345ba3</code></sub>
+</div>
 
 <div align="center"><sub>Built for structured AI agent workflows with verifiable execution.</sub></div>

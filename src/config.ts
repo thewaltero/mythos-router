@@ -3,10 +3,13 @@
 //  Constants, system prompt, validation, and provider config
 // ─────────────────────────────────────────────────────────────
 
+// Anthropic model tiers. Defaults can be overridden per-tier via env vars,
+// mirroring MYTHOS_OPENAI_MODEL / MYTHOS_DEEPSEEK_MODEL. This lets users pin an
+// older version (e.g. MYTHOS_ANTHROPIC_MODEL_HIGH=claude-opus-4-7) without code changes.
 export const MODELS: Record<string, string> = {
-  high: 'claude-opus-4-7',
-  medium: 'claude-sonnet-4-6',
-  low: 'claude-haiku-4-5-20251001',
+  high: process.env.MYTHOS_ANTHROPIC_MODEL_HIGH?.trim() || 'claude-opus-4-8',
+  medium: process.env.MYTHOS_ANTHROPIC_MODEL_MEDIUM?.trim() || 'claude-sonnet-4-6',
+  low: process.env.MYTHOS_ANTHROPIC_MODEL_LOW?.trim() || 'claude-haiku-4-5-20251001',
 };
 
 export const MAX_CORRECTION_RETRIES = 2;
@@ -28,10 +31,11 @@ export const MAX_OUTPUT_TOKENS_STREAM = 16384;
 export const MAX_OUTPUT_TOKENS_SEND = 8192;
 
 // ── Anthropic Pricing (USD per token) ────────────────────────
-// Claude Opus pricing as of 2026-04. Update these when Anthropic changes rates.
+// Claude Opus 4.8 pricing as of 2026-05. Verified unchanged from Opus 4.7:
+// $5.00 / 1M input, $25.00 / 1M output. Update these when Anthropic changes rates.
 // Note: when the provider API does not return token usage, budget/cost figures
 // fall back to a rough characters/4 estimate — a guardrail, not exact billing.
-// Source: https://docs.anthropic.com/en/docs/about-claude/pricing
+// Source: https://www.anthropic.com/claude/opus
 export const COST_PER_INPUT_TOKEN = 5 / 1_000_000; // $5.00 / 1M input tokens
 export const COST_PER_OUTPUT_TOKEN = 25 / 1_000_000; // $25.00 / 1M output tokens
 
@@ -51,7 +55,7 @@ export const DEFAULT_IGNORE_PATTERNS = Object.freeze([
 export const CAPYBARA_SYSTEM_PROMPT = `\
 ## IDENTITY
 Tier: Capybara (Mythos Router — Specialized in Cybersecurity & PhD Reasoning)
-Model: Claude Opus 4.7 | Protocol: Strict Write Discipline
+Model: Claude Opus 4.8 | Protocol: Strict Write Discipline
 Session: mythos-router local power tool
 
 ## CORE DIRECTIVES
