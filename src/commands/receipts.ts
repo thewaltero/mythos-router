@@ -6,6 +6,7 @@ import {
   type ReceiptSummary,
   type SWDReceipt,
 } from '../receipts.js';
+import { planUndo, executeUndo, type UndoPlan, type UndoExecution } from '../receipt-undo.js';
 import { formatReceiptMarkdown } from '../receipt-markdown.js';
 import { c, error, heading, hr, info, success, theme, warn } from '../utils.js';
 
@@ -15,6 +16,8 @@ interface ReceiptsOptions {
   format?: string;
   markdown?: boolean;
   pr?: boolean;
+  yes?: boolean;
+  force?: boolean;
 }
 
 export async function receiptsCommand(
@@ -49,8 +52,13 @@ export async function receiptsCommand(
     return;
   }
 
+  if (normalizedAction === 'undo') {
+    await runReceiptUndo(target ?? 'latest', options);
+    return;
+  }
+
   warn(`Unknown receipts action: ${normalizedAction}`);
-  info('Usage: mythos receipts | mythos receipts show latest [--markdown|--format markdown] | mythos receipts verify latest');
+  info('Usage: mythos receipts | mythos receipts show latest [--markdown|--format markdown] | mythos receipts verify latest | mythos receipts undo latest [--yes]');
 }
 
 function printReceiptList(limit: number, asJson?: boolean): void {
@@ -155,6 +163,94 @@ function printReceiptVerification(target: string, asJson?: boolean): void {
     success('Receipt verification passed.');
   } else {
     warn('Receipt verification found drift or integrity issues.');
+  }
+}
+
+async function runReceiptUndo(target: string, options: ReceiptsOptions): Promise<void> {
+  const receipt = readReceipt(target);
+  if (!receipt) {
+    error(`Receipt not found: ${target}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const apply = options.yes === true;
+  const force = options.force === true;
+  const plan = planUndo(receipt, { force });
+
+  if (!plan.integrityOk && !force) {
+    if (wantsJson(options)) {
+      console.log(JSON.stringify({ receiptId: plan.receiptId, integrityOk: false, applied: false }, null, 2));
+    } else {
+      error(`Receipt integrity hash does not match for ${plan.receiptId}. The receipt may have been edited.`);
+      info('Refusing to undo a tampered receipt. Re-run with --force to override.');
+    }
+    process.exitCode = 1;
+    return;
+  }
+
+  if (plan.rolledBack && !force && !wantsJson(options)) {
+    warn(`Receipt ${plan.receiptId} was already rolled back; there is likely nothing to undo.`);
+  }
+
+  const execution = await executeUndo(plan, { apply });
+
+  if (wantsJson(options)) {
+    console.log(JSON.stringify({ ...plan, execution }, null, 2));
+    process.exitCode = execution.applied && !execution.ok ? 1 : 0;
+    return;
+  }
+
+  printUndoPlan(plan, execution, apply);
+  process.exitCode = execution.applied && !execution.ok ? 1 : 0;
+}
+
+function printUndoPlan(plan: UndoPlan, execution: UndoExecution, applied: boolean): void {
+  console.log(heading(`Undo Receipt ${plan.receiptId}`));
+  if (!plan.integrityOk) {
+    warn('Receipt integrity hash does not match (proceeding under --force).');
+  }
+
+  for (const item of plan.items) {
+    if (item.classification === 'reverse-delete') {
+      console.log(`  ${theme.success}REVERSE${c.reset} ${c.cyan}delete${c.reset} ${item.path}`);
+      console.log(`     ${c.dim}${item.reason}${c.reset}`);
+    } else {
+      console.log(`  ${theme.warning}SKIP${c.reset} ${c.cyan}${item.originalOperation}${c.reset} ${item.path}`);
+      console.log(`     ${c.dim}${item.reason}${c.reset}`);
+      if (item.gitHint) {
+        console.log(`     ${c.dim}restore manually: ${item.gitHint}${c.reset}`);
+      }
+    }
+  }
+
+  for (const b of execution.blocked) {
+    console.log(`  ${theme.error}BLOCKED${c.reset} ${c.cyan}${b.operation}${c.reset} ${b.path}`);
+    console.log(`     ${c.dim}${b.reason}${c.reset}`);
+  }
+
+  console.log(hr());
+
+  if (plan.reversible.length === 0) {
+    info('Nothing in this receipt can be auto-reversed.');
+    return;
+  }
+
+  if (!applied) {
+    info(`${plan.reversible.length} change(s) can be reversed. This was a preview — re-run with --yes to apply.`);
+    return;
+  }
+
+  if (execution.ok) {
+    success(`Reversed ${plan.reversible.length} change(s).`);
+    if (execution.receipt) {
+      console.log(`  ${c.dim}Undo receipt: ${execution.receipt.id}${c.reset}`);
+    }
+  } else {
+    warn('Undo completed with issues.');
+    for (const err of execution.errors) {
+      error(err);
+    }
   }
 }
 

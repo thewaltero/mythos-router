@@ -3,12 +3,18 @@ import { c, hr, BANNER, theme } from '../utils.js';
 
 interface StatsOptions {
   days?: string;
+  json?: boolean;
 }
 
 export async function statsCommand(options: StatsOptions): Promise<void> {
   const allMetrics = loadSessionMetrics();
+  const asJson = options.json === true;
 
   if (allMetrics.length === 0) {
+    if (asJson) {
+      console.log(JSON.stringify({ sessions: 0, totalCostUSD: 0, byCommand: {}, byProject: {} }, null, 2));
+      return;
+    }
     console.log(BANNER);
     console.log(`  ${c.dim}No metrics found yet. Start chatting to log some metrics!${c.reset}`);
     return;
@@ -40,6 +46,20 @@ export async function statsCommand(options: StatsOptions): Promise<void> {
 
     costByCommand[m.command] = (costByCommand[m.command] || 0) + m.costUSD;
     costByProject[m.project] = (costByProject[m.project] || 0) + m.costUSD;
+  }
+
+  if (asJson) {
+    console.log(JSON.stringify({
+      windowDays: options.days ? parseInt(options.days, 10) : null,
+      sessions: metrics.length,
+      totalTurns,
+      totalInputTokens,
+      totalOutputTokens,
+      totalCostUSD: Number(totalCost.toFixed(6)),
+      byCommand: costByCommand,
+      byProject: costByProject,
+    }, null, 2));
+    return;
   }
 
   console.log(BANNER);

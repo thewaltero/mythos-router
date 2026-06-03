@@ -2,7 +2,7 @@
 <img src="assets/banner.png" alt="Mythos Router Banner" width="864" />
 
 [![CodeQL](https://github.com/thewaltero/mythos-router/actions/workflows/github-code-scanning/codeql/badge.svg?branch=main)](https://github.com/thewaltero/mythos-router/actions/workflows/github-code-scanning/codeql)
-[![Node.js](https://img.shields.io/badge/Node.js-20+-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
+[![Node.js](https://img.shields.io/badge/Node.js-22+-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://typescriptlang.org)
 [![Claude](https://img.shields.io/badge/Claude-Opus_4.8-cc785c?style=flat-square)](https://anthropic.com)
 [![$MYTHOS on Uniswap](https://img.shields.io/badge/%24MYTHOS-on_Uniswap-cc785c?style=flat-square&labelColor=1a1a2e)](https://app.uniswap.org/swap?outputCurrency=0xb942b75a602fa318ac091370d93d9143ba345ba3&chain=base)
@@ -56,6 +56,7 @@ Zero slop. Zero hallucinated state. Full adaptive thinking.
 |  **Strict Write Discipline** | Pre/post filesystem snapshots verify every model or external-agent file claim |
 |  **Isolated Runs** | `swd apply --check <cmd>` / `--run-checks` test a batch in a throwaway copy and apply it to the real tree only if checks pass — the real tree is never left broken |
 |  **SWD Receipts** | Per-run trust receipts record touched files, hashes, provider/external-agent id, budget, git state, and verification result |
+|  **Receipt Undo** | `receipts undo <id\|latest>` replays a verified receipt in reverse — previews by default, `--yes` to apply, drift-gated so it never overwrites newer edits, and produces its own receipt |
 |  **Project Policy** | `.mythos/policy.json` adds enforced repo-local SWD guardrails for sensitive project surfaces |
 |  **Self-Healing Memory** | Authority-based logging with a rebuildable SQLite FTS5 search index *(Node 22+)* |
 |  **Auto-Healing TDD** | Pass `--test-cmd` for bounded, error-driven autonomous repair loops |
@@ -98,7 +99,7 @@ As memory approaches capacity, the `dream` command delegates a compression phase
 
 ## Installation
 
-> **Node.js Version Requirement:** The core CLI runs perfectly on **Node 20+**. However, the advanced SQLite-backed features (Telemetry Dashboard, Deterministic Caching, and High-Performance Memory Index) require **Node.js 22.5.0+**. If you run the tool on an older version, these features safely degrade with a warning without crashing the router.
+> **Node.js Version Requirement:** The CLI requires **Node.js 22+** (enforced via `engines` and tested in CI on Node 22 and 24). The advanced SQLite-backed features (Telemetry Dashboard, Deterministic Caching, and High-Performance Memory Index) require **Node.js 22.5.0+** specifically; on Node 22.0–22.4 these features safely degrade with a warning without crashing the router.
 
 ### Quick Start (npm)
 

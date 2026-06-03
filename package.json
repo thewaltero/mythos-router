@@ -1,7 +1,7 @@
 {
   "name": "mythos-router",
-  "version": "1.16.0",
-  "description": "Capybara-tier CLI router — Claude Opus 4.7 with Adaptive Thinking, Strict Write Discipline, and Self-Healing Memory",
+  "version": "1.17.0",
+  "description": "Capybara-tier CLI router — Claude Opus 4.8 with Adaptive Thinking, Strict Write Discipline, and Self-Healing Memory",
   "type": "module",
   "bin": {
     "mythos": "dist/cli.js",
@@ -29,6 +29,7 @@
     "dev": "tsx src/cli.ts",
     "build": "tsc",
     "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "test:coverage": "node --import tsx --test --experimental-test-coverage \"test/**/*.test.ts\"",
     "prepublishOnly": "npm run build",
     "start": "node dist/cli.js",
     "chat": "tsx src/cli.ts chat",

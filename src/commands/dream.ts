@@ -24,6 +24,7 @@ export async function dreamCommand(options: {
   dryRun?: boolean;
 }): Promise<void> {
   const dryRun = options.dryRun === true;
+  const startedAt = Date.now();
   console.log(heading('💤 Summarization Dream'));
   if (dryRun) {
     console.log(`  ${dryRunBadge()} ${c.dim}Memory writes will be previewed, not executed.${c.reset}\n`);
@@ -141,7 +142,7 @@ export async function dreamCommand(options: {
         outputTokens: response.outputTokens,
         turns: 1,
         costUSD,
-        durationMs: 0, // Not easily trackable without start time, 0 is fine
+        durationMs: Date.now() - startedAt,
         timestamp: new Date().toISOString(),
       });
     }

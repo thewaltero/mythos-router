@@ -64,7 +64,7 @@ process.on('uncaughtExceptionMonitor', restoreCursor);
 program
   .name('mythos')
   .description(
-    'Capybara-tier CLI router — Claude Opus 4.7 with Adaptive Thinking, ' +
+    'Capybara-tier CLI router — Claude Opus 4.8 with Adaptive Thinking, ' +
     'Strict Write Discipline, and Self-Healing Memory.',
   )
   .version(pkg.version);
@@ -296,6 +296,7 @@ program
   .command('stats')
   .description('Show budget analytics and token usage across sessions')
   .option('-d, --days <n>', 'Filter metrics by the last N days')
+  .option('--json', 'Print machine-readable JSON for CI and automation')
   .action(statsCommand);
 
 // ── mythos providers ─────────────────────────────────────────
@@ -309,14 +310,16 @@ program
 // SWD receipt inspection and drift verification
 program
   .command('receipts')
-  .description('List, inspect, and verify SWD trust receipts')
-  .argument('[action]', 'list | show | verify | latest')
+  .description('List, inspect, verify, and undo SWD trust receipts')
+  .argument('[action]', 'list | show | verify | undo | latest')
   .argument('[target]', 'receipt id or latest')
   .option('-n, --limit <n>', 'Number of receipts to show when listing', '10')
   .option('--json', 'Print machine-readable JSON')
   .option('--format <format>', 'Output format for show/latest: json | markdown')
   .option('--markdown', 'Print a PR-ready Markdown receipt summary for show/latest')
   .option('--pr', 'Alias for --markdown')
+  .option('--yes', 'Apply the undo (without this flag, undo only previews)')
+  .option('--force', 'Undo even if the receipt drifted or its integrity hash fails')
   .action(receiptsCommand);
 
 // Mythos skill pack management

@@ -156,6 +156,16 @@ export {
   type ReceiptFileVerification,
 } from './receipts.js';
 export { formatReceiptMarkdown } from './receipt-markdown.js';
+export {
+  planUndo,
+  executeUndo,
+  undoReceipt,
+  type UndoPlan,
+  type UndoPlanItem,
+  type UndoExecution,
+  type UndoOutcome,
+  type UndoClassification,
+} from './receipt-undo.js';
 
 // Export the Budget Limiter
 export { SessionBudget, type BudgetConfig, type BudgetCheck, type BudgetSnapshot } from './budget.js';

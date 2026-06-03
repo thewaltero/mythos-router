@@ -7,11 +7,7 @@
 
 ## Runtime Hygiene
 
-### Dream duration tracking
-- **Component**: `dream.ts`
-- **Behavior**: `durationMs` is currently hardcoded as 0
-- **Improvement**: Capture start timestamp before execution and compute elapsed time
-- **Impact**: None (observability-only correction)
+_(Dream duration tracking — resolved in 1.17.0: `dream` now records actual elapsed time.)_
 
 ---
 
@@ -58,7 +54,7 @@
 
 | Area | Consideration |
 |------|------|
-| CLI output serialization | Add `--json` mode for CI and automation usage |
+| CLI output serialization | `--json` added to `stats` (1.17.0); `swd`/`receipts`/`runs` already support it. Remaining commands can follow the same pattern as needed. |
 | Error classification | Replace string-matching with structured error types in orchestrator |
 | Telemetry query robustness | Replace ID-based pagination with deterministic ordering (`ORDER BY id DESC LIMIT`) |
 | Storage scalability | Current JSON-based metrics storage is sufficient until large session volumes (~5k+ sessions) |
