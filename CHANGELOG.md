@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.17.0] - 2026-06-03
+
+### Added
+- **Receipt Undo** - `mythos receipts undo <id|latest>` replays a verified receipt in reverse. By default it previews the reversal; `--yes` applies it. Reversal actions run through the same security-policy review and SWD engine as any other write, and applying an undo produces its own verifiable receipt. Available in the SDK via `planUndo` / `executeUndo` / `undoReceipt`.
+- **Stats JSON Output** - `mythos stats --json` emits machine-readable budget analytics (sessions, tokens, cost, per-command and per-project breakdowns) for CI and automation.
+- **Coverage in CI** - Added a `test:coverage` script and a CI coverage report step (Node 22, Ubuntu leg).
+
+### Security
+- **Drift-Gated Undo** - Undo only reverses a file when the working tree still matches what the receipt produced, so it never clobbers newer edits (override with `--force`). Tampered receipts (integrity-hash mismatch) are refused unless forced.
+- **Content-Free by Design** - Because receipts store hashes, not file content, undo fully reverses `CREATE`s (by deletion) and reports `MODIFY`/`DELETE` as not auto-reversible rather than guessing — surfacing a manual `git checkout` hint when the repo is under git. Undo can never write to a sensitive (blocked) path.
+
+### Fixed
+- **Branding Consistency** - CLI `--help` description and the package description now say "Claude Opus 4.8", matching the rest of the project.
+- **Dream Duration Metric** - `dream` now records actual elapsed time instead of a hardcoded `0`.
+
+---
+
 ## [1.16.0] - 2026-05-30
 
 ### Added
