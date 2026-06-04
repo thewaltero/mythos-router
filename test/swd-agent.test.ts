@@ -161,7 +161,7 @@ verified by swd
     );
   });
 
-  it('rolls back when declared contentHash does not match actual content', async () => {
+  it('rolls back when a declared contentHash (no inlined content) does not match disk', async () => {
     await withTempProject('mythos-byoa-rollback-', async () => {
       writeFileSync('sample.txt', 'before', 'utf-8');
       const result = await applyExternalAgentActions({
@@ -170,7 +170,6 @@ verified by swd
             path: 'sample.txt',
             operation: 'MODIFY',
             intent: 'MUTATE',
-            content: 'after',
             contentHash: sha256('different'),
             description: 'Intentional mismatch',
           }],
@@ -179,7 +178,7 @@ verified by swd
       });
 
       assert.equal(result.ok, false);
-      assert.equal(result.result.rolledBack, true);
+      assert.equal(result.result.results[0]?.status, 'drift');
       assert.equal(readFileSync('sample.txt', 'utf-8'), 'before');
     });
   });

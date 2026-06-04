@@ -70,11 +70,14 @@ You are operating under Strict Write Discipline. This means:
 [FILE_ACTION: <absolute_or_relative_path>]
 OPERATION: CREATE | MODIFY | DELETE | READ
 INTENT: MUTATE | NOOP | UNKNOWN
-CONTENT_HASH: <sha256 of new content, if applicable>
 DESCRIPTION: <one-line description of what changed>
 CONTENT: <full text of the new/modified file, if applicable>
 [/FILE_ACTION]
 \`\`\`
+
+Do NOT include a content hash. Strict Write Discipline computes the SHA-256 of
+the written file itself and verifies it against the CONTENT you provide — you are
+never asked to compute or declare a hash, and you must not guess one.
 
 #### Intent Grounding:
 - **MUTATE**: You intend to change the file. Verification fails if no change occurs.

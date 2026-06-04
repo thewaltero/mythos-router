@@ -327,15 +327,29 @@ export class SWDEngine {
         break;
     }
 
-    if (action.contentHash && after.hash !== action.contentHash) {
-      return result('drift', `Hash mismatch on ${action.path}: expected ${action.contentHash.slice(0, 12)}, got ${after.hash.slice(0, 12)}`);
-    }
-
+    // Content integrity — the authoritative SWD check.
+    // When content is inlined (always the case for the built-in agent), SWD
+    // computes the SHA-256 itself from the intended content and verifies the
+    // bytes on disk match. SWD never trusts a caller- or model-declared hash
+    // here: a language model cannot compute a real SHA-256 of its own output,
+    // so the hash is derived from ground truth, not believed.
     if (action.content !== undefined && ['CREATE', 'MODIFY'].includes(action.operation)) {
       const expectedHash = createHash('sha256').update(action.content).digest('hex');
       if (after.hash !== expectedHash) {
-        return result('drift', `Written content does not match intended content for ${action.path}`);
+        return result(
+          'drift',
+          `Written content does not match intended content for ${action.path}: expected ${expectedHash.slice(0, 12)}…, got ${after.hash.slice(0, 12)}…`,
+        );
       }
+    } else if (action.contentHash && after.hash !== action.contentHash) {
+      // Fallback for actions that do NOT inline content: an external agent
+      // may instead assert the expected post-write state by SHA-256 (e.g.
+      // `mythos swd apply` with a precomputed hash). Only enforced when the
+      // caller supplied a real hash and no content to verify against.
+      return result(
+        'drift',
+        `Hash mismatch on ${action.path}: expected ${action.contentHash}, got ${after.hash}`,
+      );
     }
 
     return result(
