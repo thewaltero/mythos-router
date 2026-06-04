@@ -49,7 +49,7 @@ Zero slop. Zero hallucinated state. Full adaptive thinking.
 |  **mythos init** | Single-command project onboarding with environment validation, read-only `--check`, and scaffolding |
 |  **mythos learn** | Generate a repo-local `SKILL.md` from detected project structure, scripts, docs, CI, and risk surfaces |
 |  **mythos run** | One-shot prompt mode with inline, file, stdin input, and optional `--provider` BYOK selection: same SWD, budget, skills, branch, and optional test-healing pipeline as chat |
-|  **Multi-Provider BYOK** | Auto-routes between configured Anthropic, DeepSeek, and OpenAI keys with circuit breakers; Anthropic is no longer required when another provider is configured |
+|  **Multi-Provider BYOK** | Auto-routes between configured Anthropic, DeepSeek, OpenAI, and Surplus keys with circuit breakers; Anthropic is no longer required when another provider is configured |
 |  **Verified Skill Packs** | Load project-local or user-global `SKILL.md` rules with `-s <name>`; active skills are recorded in SWD receipts |
 |  **Deterministic Caching** | SQLite-backed caching for reasoning (SDK only) *(Node 22+)* |
 |  **Adaptive Thinking** | Opus 4.8 with configurable effort levels (high/medium/low) |
@@ -108,10 +108,11 @@ As memory approaches capacity, the `dream` command delegates a compression phase
 npm install -g mythos-router
 
 # Set at least one model key for mythos chat/run
-# Anthropic remains the recommended default, but OpenAI/DeepSeek can be used standalone.
+# Anthropic remains the recommended default, but OpenAI/DeepSeek/Surplus can be used standalone.
 export ANTHROPIC_API_KEY="sk-ant-..."
 # export OPENAI_API_KEY="sk-proj-..."
 # export DEEPSEEK_API_KEY="sk-..."
+# export SURPLUS_API_KEY="inf_..."   # Surplus marketplace (OpenAI-compatible, discounted)
 
 # Initialize and start the built-in Mythos agent
 mythos init
@@ -604,6 +605,9 @@ This is a deliberate design choice, not a missing feature. Mythos asks the model
 | `ANTHROPIC_API_KEY` | Optional* | Anthropic/Claude key; recommended default provider for `chat`/`run` |
 | `OPENAI_API_KEY` | Optional* | OpenAI API key; can be used as the only configured provider or fallback |
 | `DEEPSEEK_API_KEY` | Optional* | DeepSeek API key; can be used as the only configured provider or fallback |
+| `SURPLUS_API_KEY` | Optional* | [Surplus](https://www.surplusintelligence.ai) marketplace key (`inf_...`); OpenAI-compatible, routes the same models at a discount. Defaults to `claude-opus-4.8`. |
+| `MYTHOS_SURPLUS_MODEL` | Optional | Override the Surplus model id (default `claude-opus-4.8`) |
+| `MYTHOS_SURPLUS_BASE_URL` | Optional | Override the Surplus endpoint (default `https://surplusintelligence.ai/v1`) |
 
 \* `mythos chat` and `mythos run` need at least one model provider key. `mythos swd apply` needs no model key because an external agent brings its own model/key and Mythos only verifies file actions.
 

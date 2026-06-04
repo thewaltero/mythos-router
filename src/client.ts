@@ -84,6 +84,24 @@ export function getOrchestrator(): ProviderOrchestrator {
         { priority: providers.anthropic || providers.openai ? 2 : 0 },
       );
     }
+
+    // BYOK: Surplus — an OpenAI-compatible inference marketplace (Base).
+    // Same models, routed at a discount. Defaults to Claude Opus 4.8;
+    // override the model/base via MYTHOS_SURPLUS_MODEL / MYTHOS_SURPLUS_BASE_URL.
+    if (providers.surplus) {
+      _orchestrator.registerProvider(
+        new OpenAIProvider({
+          id: 'surplus',
+          apiKey: providers.surplus,
+          baseUrl: process.env.MYTHOS_SURPLUS_BASE_URL?.trim() || 'https://surplusintelligence.ai/v1',
+          defaultModel: process.env.MYTHOS_SURPLUS_MODEL?.trim() || 'claude-opus-4.8',
+        }),
+        {
+          priority:
+            providers.anthropic || providers.openai || providers.deepseek ? 3 : 0,
+        },
+      );
+    }
   }
   return _orchestrator;
 }

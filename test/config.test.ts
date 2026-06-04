@@ -105,10 +105,11 @@ describe('provider key validation', () => {
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
     DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY,
+    SURPLUS_API_KEY: process.env.SURPLUS_API_KEY,
   });
 
   const restoreEnv = (env: ReturnType<typeof snapshotEnv>) => {
-    for (const key of ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'DEEPSEEK_API_KEY'] as const) {
+    for (const key of ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'DEEPSEEK_API_KEY', 'SURPLUS_API_KEY'] as const) {
       if (env[key] === undefined) delete process.env[key];
       else process.env[key] = env[key];
     }
@@ -120,10 +121,29 @@ describe('provider key validation', () => {
       delete process.env.ANTHROPIC_API_KEY;
       process.env.OPENAI_API_KEY = 'sk-test-openai-provider';
       delete process.env.DEEPSEEK_API_KEY;
+      delete process.env.SURPLUS_API_KEY;
 
       const providers = validateProviderKeys();
       assert.equal(providers.anthropic, null);
       assert.equal(providers.openai, 'sk-test-openai-provider');
+    } finally {
+      restoreEnv(env);
+    }
+  });
+
+  it('accepts Surplus-only BYOK configuration for chat/run', () => {
+    const env = snapshotEnv();
+    try {
+      delete process.env.ANTHROPIC_API_KEY;
+      delete process.env.OPENAI_API_KEY;
+      delete process.env.DEEPSEEK_API_KEY;
+      process.env.SURPLUS_API_KEY = 'inf_test_surplus_key';
+
+      const providers = validateProviderKeys();
+      assert.equal(providers.anthropic, null);
+      assert.equal(providers.openai, null);
+      assert.equal(providers.deepseek, null);
+      assert.equal(providers.surplus, 'inf_test_surplus_key');
     } finally {
       restoreEnv(env);
     }

@@ -108,6 +108,12 @@ function checkProviders(): ProviderCheck[] {
       envVar: 'DEEPSEEK_API_KEY',
       required: false,
     },
+    {
+      name: 'Surplus (marketplace)',
+      ok: !!detected.surplus,
+      envVar: 'SURPLUS_API_KEY',
+      required: false,
+    },
   ];
 }
 
@@ -248,9 +254,8 @@ export async function initCommand(options: InitOptions): Promise<void> {
     if (p.ok) hasAnyProvider = true;
   }
 
-  const anthropicMissing = !providers.find(p => p.required)?.ok;
-  if (anthropicMissing) {
-    console.log(`\n  ${c.yellow}⚠${c.reset} ${c.bold}ANTHROPIC_API_KEY${c.reset}${c.dim} is required to use mythos${c.reset}`);
+  if (!hasAnyProvider) {
+    console.log(`\n  ${c.yellow}⚠${c.reset} ${c.dim}No model provider configured. Set at least one of ${c.reset}${c.bold}ANTHROPIC_API_KEY${c.reset}${c.dim}, ${c.reset}${c.bold}OPENAI_API_KEY${c.reset}${c.dim}, ${c.reset}${c.bold}DEEPSEEK_API_KEY${c.reset}${c.dim}, or ${c.reset}${c.bold}SURPLUS_API_KEY${c.reset}${c.dim} to use mythos chat/run.${c.reset}`);
   }
 
   console.log();

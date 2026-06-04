@@ -164,11 +164,18 @@ export function getDeepSeekKey(): string | null {
   return key.trim();
 }
 
+export function getSurplusKey(): string | null {
+  const key = process.env.SURPLUS_API_KEY;
+  if (!key || typeof key !== 'string' || key.trim().length === 0) return null;
+  return key.trim();
+}
+
 /** Detect which provider API keys are configured */
 export interface AvailableProviders {
   anthropic: string | null;
   openai: string | null;
   deepseek: string | null;
+  surplus: string | null;
 }
 
 export function detectProviders(): AvailableProviders {
@@ -178,6 +185,7 @@ export function detectProviders(): AvailableProviders {
     anthropic: process.env.ANTHROPIC_API_KEY?.trim() || null,
     openai: getOpenAIKey(),
     deepseek: getDeepSeekKey(),
+    surplus: getSurplusKey(),
   };
 }
 
@@ -186,13 +194,15 @@ export function validateProviderKeys(): AvailableProviders {
     anthropic: getAnthropicKey(),
     openai: getOpenAIKey(),
     deepseek: getDeepSeekKey(),
+    surplus: getSurplusKey(),
   };
-  if (!providers.anthropic && !providers.openai && !providers.deepseek) {
+  if (!providers.anthropic && !providers.openai && !providers.deepseek && !providers.surplus) {
     throw new Error(
       'No model provider API key set. Configure at least one provider for mythos chat/run:\n' +
       '  ANTHROPIC_API_KEY="sk-ant-..."     # Claude / recommended default\n' +
       '  OPENAI_API_KEY="sk-..."            # OpenAI-compatible fallback\n' +
       '  DEEPSEEK_API_KEY="..."             # DeepSeek fallback\n' +
+      '  SURPLUS_API_KEY="inf_..."          # Surplus marketplace (discounted, OpenAI-compatible)\n' +
       'Note: mythos swd apply does not require any model API key.'
     );
   }
