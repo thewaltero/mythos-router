@@ -24,6 +24,19 @@ import {
   sanitizeReceiptOutputTail,
 } from '../receipts.js';
 
+// ── Context Window Guard ─────────────────────────────────────
+// Token-estimation + adaptive-compression math lives in ./context-guard.ts as
+// pure, unit-tested helpers; ChatSession holds only the per-session calibration
+// state (chars/token density + sample count) and delegates the math.
+import {
+  DEFAULT_CHARS_PER_TOKEN,
+  MIN_COMPRESSION_FRACTION,
+  estimateTokens as estimateTokensFor,
+  messagesToFitTokenTarget,
+  nextDensity,
+  isCalibrated,
+} from '../context-guard.js';
+
 // ── UI Abstraction ──────────────────────────────────────────
 export interface ChatUI {
   startLoading(msg: string): void;
@@ -72,6 +85,10 @@ class ChatSession {
   private activeSkills: Skill[] = [];
   private touchedFiles = new Set<string>();
   private pendingTestCommandReview = false;
+  // Calibrated tokenizer density (chars per token), refined from real provider
+  // usage. Seeded with a rough default until enough real samples accumulate.
+  private charsPerToken = DEFAULT_CHARS_PER_TOKEN;
+  private tokenCalibrationSamples = 0;
 
   constructor(options: ChatOptions, ui: ChatUI) {
     this.options = options;
@@ -156,15 +173,43 @@ class ChatSession {
     return branchName;
   }
 
+  /**
+   * Estimate prompt tokens for a given character count using the calibrated
+   * chars/token density (refined from real provider usage).
+   */
+  private estimateTokens(chars: number): number {
+    return estimateTokensFor(chars, this.charsPerToken, isCalibrated(this.tokenCalibrationSamples));
+  }
+
+  /**
+   * Refine the chars/token density from a real provider turn: we know exactly
+   * how many characters were sent and how many input tokens the provider
+   * charged for, so the ratio is this session's true tokenizer density. Only a
+   * turn that yields a usable ratio counts toward the sample total.
+   */
+  private calibrateTokenEstimate(observedChars: number, reportedInputTokens: number): void {
+    if (!Number.isFinite(reportedInputTokens) || reportedInputTokens <= 0) return;
+    if (!Number.isFinite(observedChars) || observedChars <= 0) return;
+    this.charsPerToken = nextDensity(
+      this.charsPerToken,
+      observedChars,
+      reportedInputTokens,
+      this.tokenCalibrationSamples,
+    );
+    this.tokenCalibrationSamples++;
+  }
+
   private async enforceContextWindowGuard(): Promise<void> {
     let historyLength = 0;
     for (const msg of this.history) {
       historyLength += msg.content.length;
     }
 
-    // 1. Token estimation with 1.2x safety multiplier
-    const historyTokens = Math.ceil((historyLength / 4) * 1.2);
-    const systemPromptTokens = Math.ceil(((this.finalSystemPrompt?.length ?? 0) / 4) * 1.2);
+    // 1. Token estimation using the calibrated chars/token density (refined
+    //    from real provider usage) plus a safety margin that shrinks once we
+    //    have enough real samples to trust the estimate.
+    const historyTokens = this.estimateTokens(historyLength);
+    const systemPromptTokens = this.estimateTokens(this.finalSystemPrompt?.length ?? 0);
 
     // 3. System prompt inclusion safety buffer
     const RESPONSE_BUFFER = 8192;
@@ -177,10 +222,25 @@ class ChatSession {
 
     if (!overTokenLimit && !overMessageLimit) return;
 
-    // At least 60%, or more if needed to get under the message cap
-    const messagesToCompress = Math.max(
-      Math.floor(this.history.length * 0.6),
-      this.history.length - (MAX_MESSAGES - 1)
+    // Adaptive compression. Three lower bounds, take the largest:
+    //   a) the original 60% floor (never compress less than before),
+    //   b) enough to satisfy the message cap, and
+    //   c) enough that the KEPT tail is estimated (at the calibrated density)
+    //      to sit under COMPRESSION_TARGET_FRACTION of the effective limit —
+    //      so a token-dense session sheds more in one pass instead of
+    //      re-compressing on the very next turn.
+    const messagesToCompress = Math.min(
+      this.history.length - 1, // always keep at least the most recent turn
+      Math.max(
+        Math.floor(this.history.length * MIN_COMPRESSION_FRACTION),
+        this.history.length - (MAX_MESSAGES - 1),
+        messagesToFitTokenTarget(
+          this.history.map((m) => m.content.length),
+          effectiveLimit,
+          this.charsPerToken,
+          isCalibrated(this.tokenCalibrationSamples),
+        ),
+      ),
     );
 
     if (messagesToCompress < 2) return;
@@ -233,6 +293,12 @@ class ChatSession {
     this.history.push({ role: 'user', content: input });
     this.ui.startLoading('Capybara is thinking...');
 
+    // Characters actually sent this turn (system prompt + full history). Paired
+    // with the provider's reported input tokens below, this is the ground-truth
+    // tokenizer density used to calibrate the context-window guard.
+    const requestChars = (this.finalSystemPrompt?.length ?? 0)
+      + this.history.reduce((sum, m) => sum + m.content.length, 0);
+
     let thinkingTokens = 0;
     let streamStarted = false;
 
@@ -272,6 +338,8 @@ class ChatSession {
       }
       this.history.push({ role: 'assistant', content: response.text });
       this.budget.record(response.usage.inputTokens, response.usage.outputTokens, response.metadata.modelId, response.metadata.providerId);
+      // Calibrate the context-window guard from this turn's real token usage.
+      this.calibrateTokenEstimate(requestChars, response.usage.inputTokens);
 
       if (this.options.verbose) printVerboseParse(response.text);
 

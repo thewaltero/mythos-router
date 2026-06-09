@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.18.0] - 2026-06-09
+
+### Added
+- **Surplus Provider (BYOK)** - Added [Surplus](https://www.surplusintelligence.ai), an OpenAI-compatible inference marketplace on Base, as a first-class provider. Set `SURPLUS_API_KEY` (`inf_...`) to route the same models at a marketplace discount. Configurable via `MYTHOS_SURPLUS_MODEL` (default `claude-opus-4.8`) and `MYTHOS_SURPLUS_BASE_URL`. Surplus participates in the orchestrator's circuit-breaker fallback like any other provider and is detected by `mythos init`.
+- **Per-Provider Price Multipliers** - The pricing engine now scales the published base price per provider via `MYTHOS_PRICE_MULTIPLIER_<PROVIDER>` (e.g. `MYTHOS_PRICE_MULTIPLIER_SURPLUS=0.7` for a 30% discount). This affects only the cost the router *estimates* for routing decisions and the budget/telemetry display — never what the provider actually bills. Defaults are `1.0`, so behavior is unchanged unless explicitly configured.
+
+### Changed
+- **Calibrated Context-Window Guard** - The chat context guard no longer assumes a fixed `chars / 4` token density. It now calibrates chars-per-token from the real input-token counts the provider returns each turn (EMA-smoothed, clamped to a 2–6 chars/token band so a prompt-cache hit or estimated-usage fallback can't poison the estimate). Code- and JSON-dense sessions are estimated more accurately, reducing both premature compression and unexpected context-limit overflow. The safety margin tightens from 1.2x to 1.1x once enough real samples have been observed.
+- **Adaptive History Compression** - When compression triggers, the number of oldest turns to summarize is now adaptive: still at least the previous 60% floor, but increased when the calibrated density indicates the kept tail would not comfortably fit, so a dense session sheds enough in one pass instead of re-compressing on the next turn. At least the most recent turn is always preserved.
+
+---
+
 ## [1.17.0] - 2026-06-03
 
 ### Added
@@ -449,6 +461,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Correction Turns** — max 2 retries before yielding to human.
 - **Dream/Verify Commands** — memory compression and drift detection.
 
+[1.18.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.18.0
 [1.17.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.17.0
 [1.16.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.16.0
 [1.15.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.15.0
