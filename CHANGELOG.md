@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.18.1] - 2026-06-10
+
+### Fixed
+- **Orchestrator: status-code matching is no longer substring-based** - `isRetryableError` matched retryable status codes anywhere in the error message, so text like `"15029 bytes"` or `"req_5290"` looked like a 502/529 and triggered spurious (potentially billable) retries. A numeric `status`/`statusCode`/`response.status` property on the error object is now authoritative, with a digit-boundary token match as the message-only fallback.
+- **Memory: FTS5 search accepts arbitrary user queries** - `searchMemory` passed the raw query to FTS5 `MATCH`, so inputs like `c++`, `don't`, or anything with an unbalanced quote were FTS5 syntax errors surfacing as an empty result plus a warning. Queries are now tokenized and each term is passed as a quoted FTS5 string (OR-joined); queries with no usable tokens return empty without touching FTS5.
+- **SWD: aborted batches are fully reported** - When execution threw mid-batch, actions that had already been applied (and were then rolled back) produced no entry in the run results, under-reporting the receipt's audit trail. They are now recorded explicitly as `failed` with an "applied but not verified; rollback attempted" detail.
+- **SWD: rollback removes directories it created** - A rolled-back `CREATE` into a new nested directory previously left the empty directory chain behind. Directories created by the run are now tracked and removed during rollback, deepest-first, only while empty — pre-existing directories and non-empty directories are never touched.
+- **SWD: rollback no longer re-attempts a failed path** - A path appearing twice in the execution order could be rolled back (and error-reported) twice when the first attempt failed; each path is now attempted exactly once.
+- **Parser: traversal check is segment-based** - Path validation rejected any path *containing* `..`, which also blocked legitimate filenames like `backup..old.txt`. Only a real `..` path segment is rejected now; `resolveSafePath` continues to re-validate at execution time.
+- **Heal loop: failure counting ignores zero-count phrasings** - The regression-warning heuristic counted every `fail`/`error` substring, so summaries like `# fail 0`, `0 failures`, or identifiers like `errorHandler` inflated the count. It now prefers explicit numeric counters (`3 failed`, `failures: 2`, `# fail 0`) and otherwise counts standalone tokens, skipping `no`/`0`-prefixed mentions. Extracted to `countTestFailures` in `utils.ts` (heuristic only — it never gates a decision).
+- **Line endings normalized + enforced** - `src/memory.ts` and `src/commands/verify.ts` were CRLF while the rest of the repo was LF. Both are normalized to LF and a new `.gitattributes` enforces LF repo-wide, preventing false `receipts verify` drift reports on Windows checkouts with `core.autocrlf=true` (receipt hashes are byte-sensitive).
+
+---
+
 ## [1.18.0] - 2026-06-09
 
 ### Added
@@ -461,7 +475,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Correction Turns** — max 2 retries before yielding to human.
 - **Dream/Verify Commands** — memory compression and drift detection.
 
-[1.18.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.18.0
+[1.18.1]: https://github.com/thewaltero/mythos-router/releases/tag/v1.18.1
+[1.18.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.18.1
 [1.17.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.17.0
 [1.16.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.16.0
 [1.15.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.15.0
