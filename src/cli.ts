@@ -133,6 +133,14 @@ program
     '--resume',
     'Resume the last saved session (history + budget state)',
   )
+  .option(
+    '--escalate',
+    'Verified cost-router: run at --effort, then climb one model tier per correction turn only when SWD verification fails',
+  )
+  .option(
+    '--escalate-to <level>',
+    'Ceiling tier for --escalate: high (default), medium, low',
+  )
   .action(chatCommand);
 
 // mythos run
@@ -202,6 +210,14 @@ program
   .option(
     '--no-fallback',
     'Disable provider fallback for this run',
+  )
+  .option(
+    '--escalate',
+    'Verified cost-router: run at --effort, then climb one model tier per correction turn only when SWD verification fails',
+  )
+  .option(
+    '--escalate-to <level>',
+    'Ceiling tier for --escalate: high (default), medium, low',
   )
   .action((prompt: string[] | undefined, options: Parameters<typeof runCommand>[1]) => runCommand((prompt ?? []).join(' '), options));
 
@@ -325,11 +341,14 @@ program
 // Mythos skill pack management
 program
   .command('skills')
-  .description('List, inspect, create, and validate Mythos skill packs')
-  .argument('[action]', 'list | show | new | check')
+  .description('List, inspect, create, validate, and suggest Mythos skill packs')
+  .argument('[action]', 'list | show | new | check | suggest')
   .argument('[name]', 'skill name or path')
-  .option('--global', 'Create a user-global skill instead of a project-local skill')
-  .option('--force', 'Overwrite an existing skill when used with new')
+  .option('--global', 'Create or write a user-global skill instead of a project-local skill')
+  .option('--force', 'Overwrite an existing skill when used with new or suggest --write')
+  .option('--write', 'For suggest: write the proposed skill instead of only printing it')
+  .option('--min-occurrences <n>', 'For suggest: minimum recurrences before a failure becomes a rule', '2')
+  .option('--limit <n>', 'For suggest: maximum number of recent receipts to analyze', '50')
   .option('--json', 'Print machine-readable JSON')
   .action(skillsCommand);
 

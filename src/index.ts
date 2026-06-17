@@ -84,6 +84,32 @@ export {
   type LearnRepoSkillResult,
 } from './learn.js';
 
+// Export the Verified Cost-Router escalation policy
+export {
+  EFFORT_LADDER,
+  DEFAULT_ESCALATION_CEILING,
+  effortRank,
+  nextEffort,
+  effortForCorrection,
+  isAtCeiling,
+  parseEscalationConfig,
+  type EscalationConfig,
+  type EscalationOptionInput,
+} from './escalation.js';
+
+// Export Self-Improving Skills (receipt-derived skill learning)
+export {
+  analyzeReceiptsForSkill,
+  classifyFailure,
+  renderLearnedSkill,
+  DEFAULT_LEARNED_SKILL_NAME,
+  DEFAULT_MIN_OCCURRENCES,
+  type LearnedRule,
+  type SkillLearningResult,
+  type AnalyzeOptions,
+  type FailureCategory,
+} from './skill-learning.js';
+
 export {
   PROJECT_POLICY_VERSION,
   DEFAULT_PROJECT_POLICY,
@@ -138,6 +164,7 @@ export {
   saveSWDReceipt,
   listReceipts,
   readReceipt,
+  readReceipts,
   verifyReceipt,
   verifyReceiptIntegrity,
   getReceiptsDir,

@@ -6,7 +6,8 @@ import { SWDEngine, parseActions, summarizeActions, snapshotFile, resolveSafePat
 import { printSWDResults, dryRunSWD, printVerboseParse } from '../swd-cli.js';
 import { saveSessionMetric } from '../metrics.js';
 import { appendEntry, appendMetadataBlock, needsDream, getMemoryContext, printMemoryStatus, getEntryCount } from '../memory.js';
-import { type EffortLevel, MAX_CORRECTION_RETRIES, MODELS, CAPYBARA_SYSTEM_PROMPT, validateProviderKeys } from '../config.js';
+import { type EffortLevel, MAX_CORRECTION_RETRIES, MODELS, CAPYBARA_SYSTEM_PROMPT, validateProviderKeys, getEffort } from '../config.js';
+import { parseEscalationConfig, effortForCorrection, type EscalationConfig } from '../escalation.js';
 import { c, Spinner, BANNER, hr, error as logError, warn as logWarn, success as logSuccess, runTestCommand, countTestFailures, confirmPrompt, renderSessionCard, renderBadgeRow, renderHelpScreen, renderExitSummary, theme, type SessionCardConfig, type ExitSummaryConfig } from '../utils.js';
 import { SessionBudget } from '../budget.js';
 import { buildSkillPrompt, type Skill } from '../skills.js';
@@ -81,6 +82,7 @@ class ChatSession {
   public forceProvider?: string;
   public allowFallback?: boolean;
   public timeoutMs?: number;
+  private escalation: EscalationConfig;
   private ui: ChatUI;
   private activeSkills: Skill[] = [];
   private touchedFiles = new Set<string>();
@@ -93,6 +95,7 @@ class ChatSession {
   constructor(options: ChatOptions, ui: ChatUI) {
     this.options = options;
     this.ui = ui;
+    this.escalation = parseEscalationConfig(options);
     // Parse budget config
     const baseMaxTokens = parseInt(options.maxTokens ?? '500000', 10) || 500_000;
     const maxTurns = parseInt(options.maxTurns ?? '25', 10) || 25;
@@ -597,6 +600,18 @@ class ChatSession {
 
       this.ui.log(`\n${c.yellow}⟲ SWD Correction Turn ${attempt}/${MAX_CORRECTION_RETRIES}${c.reset}`);
 
+      // Verified cost-router: when escalation is enabled, each correction turn
+      // climbs one effort tier above the base (clamped to the ceiling). When
+      // disabled, the base effort string is passed through unchanged so default
+      // behavior is identical to before this feature existed.
+      const baseEffort = getEffort(this.options.effort);
+      const turnEffort: EffortLevel = this.escalation.enabled
+        ? effortForCorrection(baseEffort, attempt, this.escalation)
+        : (this.options.effort as EffortLevel);
+      if (this.escalation.enabled && turnEffort !== baseEffort) {
+        this.ui.log(`${c.dim}↑ Escalating to ${turnEffort}-effort (${MODELS[turnEffort]}) after verification failure${c.reset}`);
+      }
+
       const failures = lastResult.results
         .filter(r => ['failed', 'drift'].includes(r.status))
         .map(r => `- [${r.status.toUpperCase()}] ${r.action.operation} ${r.action.path}: ${r.detail}`)
@@ -614,7 +629,7 @@ class ChatSession {
           this.history,
           {
             systemPrompt: this.finalSystemPrompt || '',
-            effort: this.options.effort as EffortLevel,
+            effort: turnEffort,
             maxTokens: this.maxOutputTokens,
             deterministic: !!this.forceProvider,
             forceProvider: this.forceProvider,
@@ -935,6 +950,8 @@ interface ChatOptions {
   provider?: string;
   fallback?: boolean;
   resume?: boolean;
+  escalate?: boolean;
+  escalateTo?: string;
 }
 
 interface RunOptions extends Omit<ChatOptions, 'mode' | 'resume'> {

@@ -50,7 +50,9 @@ Zero slop. Zero hallucinated state. Full adaptive thinking.
 |  **mythos learn** | Generate a repo-local `SKILL.md` from detected project structure, scripts, docs, CI, and risk surfaces |
 |  **mythos run** | One-shot prompt mode with inline, file, stdin input, and optional `--provider` BYOK selection: same SWD, budget, skills, branch, and optional test-healing pipeline as chat |
 |  **Multi-Provider BYOK** | Auto-routes between configured Anthropic, DeepSeek, OpenAI, and Surplus keys with circuit breakers; Anthropic is no longer required when another provider is configured |
+|  **Verified Cost-Router** | `--escalate` runs at a cheap `--effort` and climbs one model tier per Correction Turn *only* when SWD verification fails — pay for the expensive model only when the cheap one is provably wrong (capped by `--escalate-to`) |
 |  **Verified Skill Packs** | Load project-local or user-global `SKILL.md` rules with `-s <name>`; active skills are recorded in SWD receipts |
+|  **Self-Improving Skills** | `mythos skills suggest` mines past SWD receipts for file actions that keep failing verification and proposes `SKILL.md` rules to prevent them; read-only by default, `--write` to persist |
 |  **Deterministic Caching** | SQLite-backed caching for reasoning (SDK only) *(Node 22+)* |
 |  **Adaptive Thinking** | Opus 4.8 with configurable effort levels (high/medium/low) |
 |  **Strict Write Discipline** | Pre/post filesystem snapshots verify every model or external-agent file claim |

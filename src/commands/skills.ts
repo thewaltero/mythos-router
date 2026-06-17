@@ -1,22 +1,35 @@
+import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   checkSkills,
   createSkill,
+  ensureSkillsDir,
   getGlobalSkillsDir,
   getProjectSkillsDir,
   listSkills,
   loadSkill,
+  validateSkill,
   type Skill,
   type SkillCheckIssue,
   type SkillListEntry,
 } from '../skills.js';
+import { readReceipts } from '../receipts.js';
+import {
+  analyzeReceiptsForSkill,
+  DEFAULT_LEARNED_SKILL_NAME,
+  type LearnedRule,
+  type SkillLearningResult,
+} from '../skill-learning.js';
 import { c, error, heading, hr, info, success, theme, warn } from '../utils.js';
 
 interface SkillsOptions {
   global?: boolean;
   force?: boolean;
   json?: boolean;
+  write?: boolean;
+  minOccurrences?: string;
+  limit?: string;
 }
 
 export async function skillsCommand(
@@ -56,8 +69,13 @@ export async function skillsCommand(
     return;
   }
 
+  if (normalizedAction === 'suggest') {
+    suggestSkillFromReceipts(name, options);
+    return;
+  }
+
   warn(`Unknown skills action: ${normalizedAction}`);
-  info('Usage: mythos skills | mythos skills show <name> | mythos skills new <name> | mythos skills check [name]');
+  info('Usage: mythos skills | mythos skills show <name> | mythos skills new <name> | mythos skills check [name] | mythos skills suggest [name] [--write]');
   process.exitCode = 1;
 }
 
@@ -197,6 +215,128 @@ function printIssue(issue: SkillCheckIssue): void {
     : `${theme.warning}WARN${c.reset}`;
   console.log(`  ${label} ${c.bold}${issue.scope}${c.reset} ${formatPath(issue.path)}`);
   console.log(`       ${c.dim}${issue.message}${c.reset}`);
+}
+
+function suggestSkillFromReceipts(name: string | undefined, options: SkillsOptions): void {
+  const limit = parsePositiveOption(options.limit, 50);
+  const minOccurrences = parsePositiveOption(options.minOccurrences, 2);
+  const skillName = (name && name.trim()) || DEFAULT_LEARNED_SKILL_NAME;
+
+  let receipts;
+  try {
+    receipts = readReceipts(limit);
+  } catch (err) {
+    error(err instanceof Error ? err.message : String(err));
+    process.exitCode = 1;
+    return;
+  }
+
+  const result = analyzeReceiptsForSkill(receipts, { minOccurrences, skillName });
+
+  if (options.write) {
+    writeLearnedSkill(result, options, skillName);
+    return;
+  }
+
+  if (options.json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  printSkillSuggestions(result);
+}
+
+function writeLearnedSkill(result: SkillLearningResult, options: SkillsOptions, skillName: string): void {
+  if (!result.skillMarkdown) {
+    if (options.json) {
+      console.log(JSON.stringify({ ...result, written: null }, null, 2));
+    } else {
+      printSkillSuggestions(result);
+    }
+    return;
+  }
+
+  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(skillName)) {
+    error('Skill names must use letters, numbers, dots, dashes, or underscores, and start with a letter or number.');
+    process.exitCode = 1;
+    return;
+  }
+
+  const scope = options.global ? 'global' : 'project';
+  const root = ensureSkillsDir(scope);
+  const dir = path.join(root, skillName);
+  const filePath = path.join(dir, 'SKILL.md');
+  const exists = fs.existsSync(filePath);
+
+  if (exists && !options.force) {
+    error(`Skill already exists: ${formatPath(filePath)}. Re-run with --force to overwrite.`);
+    process.exitCode = 1;
+    return;
+  }
+
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(filePath, result.skillMarkdown, 'utf-8');
+    // Confirm the generated file parses and validates like a hand-authored skill.
+    const errors = validateSkill(loadSkill(filePath)).filter((issue) => issue.level === 'error');
+    if (errors.length > 0) {
+      error(`Generated skill failed validation: ${errors.map((issue) => issue.message).join('; ')}`);
+      process.exitCode = 1;
+      return;
+    }
+  } catch (err) {
+    error(err instanceof Error ? err.message : String(err));
+    process.exitCode = 1;
+    return;
+  }
+
+  const action = exists ? 'updated' : 'created';
+  if (options.json) {
+    console.log(JSON.stringify({ ...result, written: { path: filePath, action } }, null, 2));
+    return;
+  }
+
+  success(`${action === 'created' ? 'Created' : 'Updated'} ${scope} skill: ${skillName}`);
+  console.log(`  ${c.dim}${formatPath(filePath)}${c.reset}`);
+  console.log();
+  console.log(`${c.dim}Load it:${c.reset} mythos run --file TASK.md -s ${skillName}`);
+}
+
+function printSkillSuggestions(result: SkillLearningResult): void {
+  console.log(heading('Skill Suggestions'));
+  console.log(
+    `${c.dim}Analyzed ${result.analyzedReceipts} receipt(s); found ${result.failureCount} failed/drifted action(s).${c.reset}`,
+  );
+  console.log();
+
+  if (result.rules.length === 0) {
+    for (const note of result.notes) {
+      info(note);
+    }
+    return;
+  }
+
+  for (const rule of result.rules) {
+    console.log(`  ${theme.warning}RULE${c.reset} ${c.bold}${rule.category}${c.reset} ${c.dim}(${rule.occurrences}x)${c.reset}`);
+    console.log(`     ${rule.rule}`);
+    console.log(`     ${c.dim}reason: ${rule.reason}${c.reset}`);
+    console.log(`     ${c.dim}evidence: ${rule.evidence}${c.reset}`);
+  }
+
+  console.log();
+  console.log(`${c.bold}Proposed skill: ${result.skillName}${c.reset}`);
+  console.log(hr());
+  console.log(result.skillMarkdown);
+  console.log(hr());
+  console.log();
+  for (const note of result.notes) {
+    console.log(`${c.dim}${note}${c.reset}`);
+  }
+}
+
+function parsePositiveOption(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function formatPath(filePath: string): string {

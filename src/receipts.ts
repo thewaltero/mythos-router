@@ -500,6 +500,18 @@ export function listReceipts(limit = 10): ReceiptSummary[] {
     }));
 }
 
+/**
+ * Read the most recent receipts as full records (newest first), bounded by
+ * `limit`. Unlike `listReceipts`, this returns the complete file-action detail,
+ * which callers such as skill-learning need to inspect verification outcomes.
+ */
+export function readReceipts(limit = 50): SWDReceipt[] {
+  return receiptFiles()
+    .slice(0, limit)
+    .map((filePath) => readReceiptFile(filePath))
+    .filter((receipt): receipt is SWDReceipt => receipt !== null);
+}
+
 function snapshotCurrentFile(rootDir: string, filePath: string): ReceiptSnapshot {
   const absolutePath = resolveReceiptPath(rootDir, filePath);
   if (!existsSync(absolutePath)) {
