@@ -13,6 +13,8 @@ import {
   nextDensity,
   isCalibrated,
   messagesToFitTokenTarget,
+  planContextCompression,
+  MAX_HISTORY_MESSAGES,
 } from '../src/context-guard.js';
 
 describe('estimateTokens', () => {
@@ -118,3 +120,39 @@ describe('messagesToFitTokenTarget', () => {
     assert.equal(messagesToFitTokenTarget([], 20000, 4, true), 0);
   });
 });
+
+describe('planContextCompression', () => {
+  it('returns null when the history is well under both ceilings', () => {
+    const lengths = Array(10).fill(200); // tiny, ~50 tokens total
+    assert.equal(planContextCompression(lengths, 1000, 4, true), null);
+  });
+
+  it('triggers on the message cap and reports it', () => {
+    const lengths = Array(MAX_HISTORY_MESSAGES + 5).fill(100);
+    const plan = planContextCompression(lengths, 0, 4, true);
+    assert.ok(plan, 'expected a compression plan');
+    assert.match(plan!.reason, /message cap/);
+    assert.ok(plan!.messagesToCompress >= 2);
+    // Always keeps at least the most recent turn.
+    assert.ok(plan!.messagesToCompress <= lengths.length - 1);
+  });
+
+  it('triggers on the token limit for a dense history', () => {
+    // ~10 messages of 80k chars each ≈ 200k+ estimated tokens, over the 150k cap,
+    // but well under the message cap — so the reason must be the token limit.
+    const lengths = Array(10).fill(80_000);
+    const plan = planContextCompression(lengths, 0, 4, true);
+    assert.ok(plan, 'expected a compression plan');
+    assert.match(plan!.reason, /token limit/);
+    assert.ok(plan!.messagesToCompress >= 2);
+    assert.ok(plan!.messagesToCompress <= lengths.length - 1);
+  });
+
+  it('never plans a compression that would drop the only remaining turn', () => {
+    const lengths = Array(MAX_HISTORY_MESSAGES + 1).fill(100);
+    const plan = planContextCompression(lengths, 0, 4, true);
+    assert.ok(plan);
+    assert.ok(plan!.messagesToCompress < lengths.length);
+  });
+});
+

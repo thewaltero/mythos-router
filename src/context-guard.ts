@@ -94,3 +94,65 @@ export function messagesToFitTokenTarget(
   }
   return drop;
 }
+
+// ── Compression decision ─────────────────────────────────────
+// Hard ceilings that trigger a compression pass. Exported so callers and
+// tests reference one source of truth rather than re-deriving the numbers.
+export const CONTEXT_TOKEN_LIMIT = 150_000;
+export const RESPONSE_TOKEN_BUFFER = 8192; // headroom reserved for the model's reply
+export const MAX_HISTORY_MESSAGES = 120;
+
+export interface CompressionPlan {
+  /** Number of oldest messages to compress/drop (always >= 2 when present). */
+  messagesToCompress: number;
+  /** Human-readable trigger, surfaced to the user. */
+  reason: string;
+}
+
+/**
+ * Decide whether the history needs compressing and, if so, how many of the
+ * oldest messages to fold away. Returns null when no compression is needed.
+ *
+ * This is the pure decision lifted out of ChatSession.enforceContextWindowGuard;
+ * the caller still owns the effectful part (summarizing via the model and
+ * mutating history). Three lower bounds are combined and the largest wins:
+ *   a) the original 60% floor (never compress less than before),
+ *   b) enough to satisfy the message cap, and
+ *   c) enough that the kept tail is estimated to sit under the target fraction
+ *      of the effective limit — so a token-dense session sheds more in one pass
+ *      instead of re-compressing on the very next turn.
+ * At least the most recent turn is always kept, and a plan of fewer than two
+ * messages is treated as not worth a compression round trip.
+ */
+export function planContextCompression(
+  messageLengths: number[],
+  systemPromptLength: number,
+  charsPerToken: number,
+  calibrated: boolean,
+): CompressionPlan | null {
+  const messageCount = messageLengths.length;
+  const historyLength = messageLengths.reduce((sum, len) => sum + len, 0);
+
+  const historyTokens = estimateTokens(historyLength, charsPerToken, calibrated);
+  const systemPromptTokens = estimateTokens(systemPromptLength, charsPerToken, calibrated);
+  const effectiveLimit = CONTEXT_TOKEN_LIMIT - systemPromptTokens - RESPONSE_TOKEN_BUFFER;
+
+  const overTokenLimit = historyTokens > effectiveLimit;
+  const overMessageLimit = messageCount > MAX_HISTORY_MESSAGES;
+
+  if (!overTokenLimit && !overMessageLimit) return null;
+
+  const messagesToCompress = Math.min(
+    messageCount - 1, // always keep at least the most recent turn
+    Math.max(
+      Math.floor(messageCount * MIN_COMPRESSION_FRACTION),
+      messageCount - (MAX_HISTORY_MESSAGES - 1),
+      messagesToFitTokenTarget(messageLengths, effectiveLimit, charsPerToken, calibrated),
+    ),
+  );
+
+  if (messagesToCompress < 2) return null;
+
+  const reason = overMessageLimit ? `message cap (> ${MAX_HISTORY_MESSAGES})` : '150k token limit';
+  return { messagesToCompress, reason };
+}
