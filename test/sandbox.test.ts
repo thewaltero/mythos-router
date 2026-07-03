@@ -37,6 +37,40 @@ describe('runActionsInSandbox', () => {
     }
   });
 
+  it('uses SWDEngine semantics: CREATE cannot overwrite an existing sandbox file', async () => {
+    const dir = makeProject();
+    try {
+      const result = await runActionsInSandbox(
+        [{ path: 'index.txt', operation: 'CREATE', intent: 'MUTATE', content: 'overwrite\n', description: 'bad create' }],
+        { cwd: dir, checks: [{ name: 'should-not-run', command: 'exit 0' }] },
+      );
+
+      assert.equal(result.ok, false);
+      assert.equal(result.checks.length, 0);
+      assert.match(result.setupError ?? '', /already exists/);
+      assert.equal(readFileSync(join(dir, 'index.txt'), 'utf-8'), 'original\n');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('uses SWDEngine semantics: MODIFY cannot create a missing sandbox file', async () => {
+    const dir = makeProject();
+    try {
+      const result = await runActionsInSandbox(
+        [{ path: 'src/missing.txt', operation: 'MODIFY', intent: 'MUTATE', content: 'new\n', description: 'bad modify' }],
+        { cwd: dir, checks: [{ name: 'should-not-run', command: 'exit 0' }] },
+      );
+
+      assert.equal(result.ok, false);
+      assert.equal(result.checks.length, 0);
+      assert.match(result.setupError ?? '', /does not exist/);
+      assert.equal(existsSync(join(dir, 'src', 'missing.txt')), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('reports ok=true when a declared check passes', async () => {
     const dir = makeProject();
     try {

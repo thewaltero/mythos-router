@@ -277,6 +277,44 @@ describe('SWDEngine (Production v1 API)', () => {
 
     rmSync(testDir, { recursive: true, force: true });
   });
+
+  it('snapshots oversized files by streaming hash without retaining content', () => {
+    mkdirSync(testDir, { recursive: true });
+    const big = join(testDir, 'snapshot-big.txt');
+    const content = 'Y'.repeat(100);
+    writeFileSync(big, content, 'utf-8');
+
+    const snap = snapshotFile(big, { maxContentBytes: 10 });
+
+    assert.strictEqual(snap.exists, true);
+    assert.strictEqual(snap.size, Buffer.byteLength(content));
+    assert.strictEqual(snap.content, null);
+    assert.strictEqual(snap.hash.length, 64);
+
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('does not need to hold existing large file content when CREATE fails on existing file', async () => {
+    mkdirSync(testDir, { recursive: true });
+    const big = join(testDir, 'existing-large-create-target.txt');
+    writeFileSync(big, 'Z'.repeat(100), 'utf-8');
+    const engine = new SWDEngine({ maxSnapshotBytes: 10 });
+
+    const result = await engine.run([{
+      path: big,
+      operation: 'CREATE',
+      intent: 'MUTATE',
+      content: 'replacement',
+      description: 'create over existing large file'
+    }]);
+
+    assert.strictEqual(result.success, false);
+    assert.match(result.errors.join('\n'), /already exists/);
+    assert.strictEqual(readFileSync(big, 'utf-8'), 'Z'.repeat(100));
+
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
 });
 
 describe('parseActions intent defaults', () => {

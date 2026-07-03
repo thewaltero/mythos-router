@@ -3,9 +3,10 @@
 //  Strict Write Discipline — Production API (v1)
 // ─────────────────────────────────────────────────────────────
 
-import { readFileSync, writeFileSync, statSync, existsSync, unlinkSync, realpathSync, mkdirSync, rmdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, statSync, existsSync, unlinkSync, realpathSync, mkdirSync, rmdirSync, openSync, readSync, closeSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve, relative, isAbsolute, dirname, basename, sep } from 'node:path';
+import { assertSafeRelativePathShape, isSafeRelativePathShape } from './path-safety.js';
 
 // ── Public Types ─────────────────────────────────────────────
 export type ActionIntent = 'MUTATE' | 'NOOP' | 'UNKNOWN';
@@ -198,7 +199,7 @@ export class SWDEngine {
       };
     }
 
-    const context = new InternalSessionContext();
+    const context = new InternalSessionContext(this.options.maxSnapshotBytes);
     const results: ActionResult[] = [];
     const rollbackErrors: string[] = [];
     let overallSuccess = true;
@@ -415,7 +416,7 @@ export class SWDEngine {
       const absPath = resolveSafePath(action.path);
       const original = ctx.logs.rollbackMap.get(absPath);
       const after = ctx.getCachedAfterSnapshot(action.path);
-      const current = snapshotFile(absPath);
+      const current = snapshotFile(absPath, { includeContent: false });
 
       if (!original) continue;
 
@@ -423,6 +424,8 @@ export class SWDEngine {
         try {
           if (original.exists && original.content !== null) {
             writeFileSync(absPath, original.content);
+          } else if (original.exists && original.content === null) {
+            throw new Error('original content was not captured because the snapshot exceeded the rollback content cap');
           } else if (existsSync(absPath)) {
             unlinkSync(absPath);
           }
@@ -458,6 +461,7 @@ export class SWDEngine {
 
 // ── Internal Helpers ─────────────────────────────────────────
 class InternalSessionContext {
+  constructor(private readonly maxSnapshotBytes: number = MAX_ROLLBACK_SNAPSHOT_BYTES) {}
   public snapshots = { before: new Map<string, FileSnapshot>(), after: new Map<string, FileSnapshot>() };
   public logs = {
     executionOrder: [] as FileAction[],
@@ -481,7 +485,7 @@ class InternalSessionContext {
     // 'before' snapshots are memoized — we always want the original pre-run state.
     if (type === 'before') {
       if (this.snapshots.before.has(absPath)) return this.snapshots.before.get(absPath)!;
-      const snap = snapshotFile(absPath);
+      const snap = snapshotFile(absPath, { includeContent: true, maxContentBytes: this.maxSnapshotBytes });
       this.snapshots.before.set(absPath, snap);
       if (!this.logs.rollbackMap.has(absPath)) this.logs.rollbackMap.set(absPath, snap);
       return snap;
@@ -489,7 +493,7 @@ class InternalSessionContext {
 
     // 'after' snapshots always re-read disk state. If two actions touch the same
     // file in one run, the second verification must see the latest disk reality.
-    const snap = snapshotFile(absPath);
+    const snap = snapshotFile(absPath, { includeContent: false });
     this.snapshots.after.set(absPath, snap);
     return snap;
   }
@@ -504,7 +508,23 @@ class InternalSessionContext {
 
 export function resolveSafePath(unsafePath: string): string {
   const cwd = process.cwd();
-  const absPath = resolve(cwd, unsafePath);
+  const rawPath = unsafePath.trim();
+  if (rawPath.length === 0 || rawPath.includes('\0')) {
+    throw new Error(`SECURITY VIOLATION: Path traversal detected on '${unsafePath}'.`);
+  }
+  const normalizedRelativePath = rawPath.replace(/\\/g, '/');
+  let absPath: string;
+  if (isAbsolute(rawPath)) {
+    absPath = resolve(rawPath);
+  } else {
+    let safeRelativePath: string;
+    try {
+      safeRelativePath = assertSafeRelativePathShape(normalizedRelativePath, 'action path');
+    } catch {
+      throw new Error(`SECURITY VIOLATION: Path traversal detected on '${unsafePath}'.`);
+    }
+    absPath = resolve(cwd, safeRelativePath);
+  }
   
   let realPath = absPath;
   try {
@@ -524,8 +544,8 @@ export function resolveSafePath(unsafePath: string): string {
   // Segment-based escape check. `startsWith('..')` would wrongly reject a
   // legitimately-named file like `..foo.txt` (relPath === '..foo.txt'); only a
   // real parent-escape — relPath of exactly '..' or a '..' path *segment* —
-  // should fail. This matches the segment check in parseActions(), so the two
-  // validators agree.
+  // should fail. This matches the shared path-shape validator, so every SWD
+  // input path accepts names like `backup..old.ts` and rejects real traversal.
   const escapesRoot =
     relPath === '..' ||
     relPath.startsWith(`..${sep}`) ||
@@ -536,18 +556,49 @@ export function resolveSafePath(unsafePath: string): string {
   return realPath;
 }
 
-export function snapshotFile(safeAbsPath: string): FileSnapshot {
+export interface SnapshotFileOptions {
+  includeContent?: boolean;
+  maxContentBytes?: number;
+}
+
+function hashFileSync(filePath: string): string {
+  const hash = createHash('sha256');
+  const fd = openSync(filePath, 'r');
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+
   try {
-    if (!existsSync(safeAbsPath)) return { path: safeAbsPath, exists: false, size: 0, mtime: 0, hash: '', content: null };
-    const stat = statSync(safeAbsPath);
-    const content = readFileSync(safeAbsPath);
-    const hash = createHash('sha256').update(content).digest('hex');
-    return { path: safeAbsPath, exists: true, size: stat.size, mtime: stat.mtimeMs, hash, content };
+    while (true) {
+      const bytesRead = readSync(fd, buffer, 0, buffer.length, null);
+      if (bytesRead === 0) break;
+      hash.update(buffer.subarray(0, bytesRead));
+    }
+  } finally {
+    closeSync(fd);
+  }
+
+  return hash.digest('hex');
+}
+
+export function snapshotFile(filePath: string, options: SnapshotFileOptions = {}): FileSnapshot {
+  try {
+    if (!existsSync(filePath)) return { path: filePath, exists: false, size: 0, mtime: 0, hash: '', content: null };
+    const stat = statSync(filePath);
+    const includeContent = options.includeContent ?? true;
+    const maxContentBytes = options.maxContentBytes ?? MAX_ROLLBACK_SNAPSHOT_BYTES;
+
+    if (includeContent && stat.size <= maxContentBytes) {
+      const content = readFileSync(filePath);
+      const hash = createHash('sha256').update(content).digest('hex');
+      return { path: filePath, exists: true, size: stat.size, mtime: stat.mtimeMs, hash, content };
+    }
+
+    const hash = hashFileSync(filePath);
+    return { path: filePath, exists: true, size: stat.size, mtime: stat.mtimeMs, hash, content: null };
   } catch (err: any) {
     if (err.code === 'ENOENT') {
-      return { path: safeAbsPath, exists: false, size: 0, mtime: 0, hash: '', content: null };
+      return { path: filePath, exists: false, size: 0, mtime: 0, hash: '', content: null };
     }
-    throw new Error(`Failed to snapshot file ${safeAbsPath}: ${err.message}`);
+    throw new Error(`Failed to snapshot file ${filePath}: ${err.message}`);
   }
 }
 
@@ -597,12 +648,8 @@ function lastLineStartIndexBefore(s: string, needle: string, from: number, limit
 // safety rules. Segment-based: 'a/../b' is rejected, but a filename that merely
 // contains '..' (e.g. 'backup..old.txt') is allowed. resolveSafePath()
 // re-validates at execution time regardless.
-function isPathShapeSafe(path: string): boolean {
-  if (path.trim() === '' || path.length > 500 || path.includes('\0')) return false;
-  const segments = path.split(/[\\/]+/);
-  if (segments.some(segment => segment === '..')) return false;
-  if (path.startsWith('/') || isAbsolute(path)) return false;
-  return true;
+export function isPathShapeSafe(path: string): boolean {
+  return isSafeRelativePathShape(path);
 }
 
 function resolveActionIntent(operationUpper: string, intent?: string): ActionIntent {

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { SWDEngine, parseActions, resolveSafePath, type FileAction, type SWDOptions, type SWDRunResult } from '../swd.js';
+import { SWDEngine, parseActions, type FileAction, type SWDOptions, type SWDRunResult } from '../swd.js';
 import { reviewActions, type ActionRiskVerdict } from '../security-policy.js';
 import { createSWDReceipt, saveSWDReceipt, redactReceiptSecrets, type ReceiptProvider } from '../receipts.js';
 import { isGitRepo, getCurrentBranch, getLatestHash } from '../git.js';
@@ -15,6 +15,7 @@ import {
   type TaskContractValidation,
 } from '../action-schema.js';
 import { saveRunRecord } from '../runs.js';
+import { assertSafeRelativePathShape } from '../path-safety.js';
 import { c, error as logError, success as logSuccess, warn as logWarn } from '../utils.js';
 
 export interface ExternalAgentInput {
@@ -149,24 +150,7 @@ function normalizeIntent(value: unknown, operation: FileAction['operation']): Fi
 }
 
 function assertSafeRelativePath(filePath: unknown): string {
-  if (typeof filePath !== 'string') {
-    throw new Error('Invalid action: path must be a string.');
-  }
-
-  const normalized = filePath.replace(/\\/g, '/').trim();
-  if (
-    normalized.length === 0 ||
-    normalized.length > 500 ||
-    normalized.includes('\0') ||
-    normalized.includes('..') ||
-    normalized.startsWith('/')
-  ) {
-    throw new Error(`Invalid action path: ${filePath}`);
-  }
-
-  // Reuse the authoritative SWD resolver so symlink/project-boundary checks stay consistent.
-  resolveSafePath(normalized);
-  return normalized;
+  return assertSafeRelativePathShape(filePath, 'action path', { maxLength: 500 });
 }
 
 function normalizeJsonAction(value: unknown): FileAction {

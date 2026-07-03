@@ -1,4 +1,5 @@
-import { parseActions, resolveSafePath, type FileAction } from './swd.js';
+import { parseActions, type FileAction } from './swd.js';
+import { assertSafeRelativePathShape, isSafeRelativePathShape, normalizeRelativePath } from './path-safety.js';
 import { matchesPolicyPattern, normalizePolicyPath } from './project-policy.js';
 
 export const EXTERNAL_AGENT_ACTION_SCHEMA_VERSION = 1;
@@ -397,23 +398,7 @@ function normalizeIntent(value: unknown, operation: FileAction['operation']): Fi
 }
 
 function assertSafeRelativePath(filePath: unknown): string {
-  if (typeof filePath !== 'string') {
-    throw new Error('Invalid action: path must be a string.');
-  }
-
-  const normalized = filePath.replace(/\\/g, '/').trim();
-  if (
-    normalized.length === 0 ||
-    normalized.length > MAX_PATH_LENGTH ||
-    normalized.includes('\0') ||
-    normalized.includes('..') ||
-    normalized.startsWith('/')
-  ) {
-    throw new Error(`Invalid action path: ${filePath}`);
-  }
-
-  resolveSafePath(normalized);
-  return normalized;
+  return assertSafeRelativePathShape(filePath, 'action path', { maxLength: MAX_PATH_LENGTH });
 }
 
 function normalizeTaskContract(value: unknown): TaskContract {
@@ -465,13 +450,8 @@ function validatePatternList(value: unknown, name: string): string[] {
       errors.push(`${name} entries must be non-empty strings.`);
       continue;
     }
-    const normalized = pattern.replace(/\\/g, '/').trim();
-    if (
-      normalized.length > MAX_CONTRACT_PATTERN_LENGTH ||
-      normalized.includes('\0') ||
-      normalized.includes('..') ||
-      normalized.startsWith('/')
-    ) {
+    const normalized = normalizeRelativePath(pattern);
+    if (!isSafeRelativePathShape(normalized, { maxLength: MAX_CONTRACT_PATTERN_LENGTH })) {
       errors.push(`${name} contains an unsafe pattern: ${pattern}`);
     }
   }

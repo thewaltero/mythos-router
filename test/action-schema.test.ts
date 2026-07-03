@@ -100,4 +100,34 @@ export const fromText = true;
     assert.equal(validation.contract?.ok, false);
     assert.match(validation.contract?.errors.join('\n') ?? '', /blocked/i);
   });
+
+  it('allows filenames and contract patterns that merely contain ".." inside a segment', () => {
+    const raw = JSON.stringify({
+      contract: {
+        allowedPaths: ['docs/backup..old/**'],
+        expectedOutputs: ['docs/backup..old/readme.md'],
+      },
+      actions: [{
+        path: 'docs/backup..old/readme.md',
+        operation: 'CREATE',
+        description: 'Create backup docs',
+        content: 'ok\n',
+      }],
+    });
+
+    const validation = validateExternalAgentInput(raw);
+    assert.equal(validation.ok, true);
+    assert.equal(validation.contract?.ok, true);
+  });
+
+  it('still rejects real parent traversal in contract patterns', () => {
+    const validation = validateExternalAgentInput(JSON.stringify({
+      contract: { allowedPaths: ['docs/../secret/**'] },
+      actions: [{ path: 'docs/readme.md', operation: 'CREATE', content: 'ok\n' }],
+    }));
+
+    assert.equal(validation.ok, false);
+    assert.match(validation.errors.join('\n'), /unsafe pattern/);
+  });
+
 });

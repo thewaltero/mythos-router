@@ -29,13 +29,11 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
-  unlinkSync,
-  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { isAbsolute, join, relative } from 'node:path';
 import { runTestCommand } from './utils.js';
-import type { FileAction } from './swd.js';
+import { SWDEngine, type FileAction } from './swd.js';
 
 // Names skipped when mirroring the tree (regenerable or symlinked).
 const EXCLUDED_DIR_NAMES = new Set(['.git', 'node_modules', 'dist']);
@@ -73,39 +71,6 @@ export interface SandboxRunResult {
 }
 
 const CHECK_OUTPUT_TAIL_MAX = 1200;
-
-/**
- * Resolve `relPath` strictly inside `root`. Rejects traversal and any
- * symlink whose parent escapes the jail. Mirrors swd.ts:resolveSafePath
- * but is rooted at the sandbox rather than process.cwd().
- */
-function resolveWithinRoot(root: string, relPath: string): string {
-  const abs = resolve(root, relPath);
-
-  // Resolve the real path of the deepest existing ancestor so a symlink
-  // planted in the mirrored tree cannot redirect the write outside root.
-  let probe = abs;
-  let realProbe = abs;
-  while (true) {
-    if (existsSync(probe)) {
-      realProbe = realpathSync(probe);
-      // Re-append the part of the path that does not yet exist.
-      const tail = relative(probe, abs);
-      realProbe = tail ? join(realProbe, tail) : realProbe;
-      break;
-    }
-    const parent = dirname(probe);
-    if (parent === probe) break; // reached filesystem root
-    probe = parent;
-  }
-
-  const realRoot = realpathSync(root);
-  const rel = relative(realRoot, realProbe);
-  if (rel.startsWith('..') || isAbsolute(rel)) {
-    throw new Error(`Sandbox jail violation for '${relPath}'.`);
-  }
-  return abs;
-}
 
 /**
  * Recursively mirror `src` into `dest`, skipping excluded directory names.
@@ -170,24 +135,19 @@ function linkNodeModules(root: string, sandbox: string): void {
   }
 }
 
-/** Apply approved actions inside the sandbox using the jailed resolver. */
-function applyActionsInSandbox(sandbox: string, actions: FileAction[]): void {
-  for (const action of actions) {
-    const target = resolveWithinRoot(sandbox, action.path);
-    switch (action.operation) {
-      case 'CREATE':
-      case 'MODIFY':
-        if (action.content !== undefined) {
-          mkdirSync(dirname(target), { recursive: true });
-          writeFileSync(target, action.content);
-        }
-        break;
-      case 'DELETE':
-        if (existsSync(target)) unlinkSync(target);
-        break;
-      case 'READ':
-        break;
+/** Apply approved actions inside the sandbox through the authoritative SWD engine. */
+async function applyActionsInSandbox(sandbox: string, actions: FileAction[]): Promise<void> {
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(sandbox);
+    const engine = new SWDEngine({ enableRollback: true, strict: true });
+    const result = await engine.run(actions);
+    if (!result.success || result.rolledBack) {
+      const detail = result.errors.length > 0 ? result.errors.join('; ') : 'unknown SWD failure';
+      throw new Error(`Sandbox jail/apply failed: ${detail}`);
     }
+  } finally {
+    process.chdir(previousCwd);
   }
 }
 
@@ -211,7 +171,7 @@ export async function runActionsInSandbox(
   try {
     const filesCopied = mirrorTree(root, sandbox);
     linkNodeModules(root, sandbox);
-    applyActionsInSandbox(sandbox, actions);
+    await applyActionsInSandbox(sandbox, actions);
 
     const results: SandboxCheckResult[] = [];
     for (const check of checks) {
