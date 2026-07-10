@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import * as path from 'node:path';
-import type { SWDRunResult } from './swd.js';
+import type { SWDRollbackStatus, SWDRunResult } from './swd.js';
 
 export const RECEIPTS_DIR = '.mythos/receipts';
 
@@ -124,6 +124,8 @@ export interface ReceiptSummary {
   fileCount: number;
   success: boolean;
   rolledBack: boolean;
+  rollbackStatus?: SWDRollbackStatus;
+  recoveryRequired?: boolean;
   provider?: string;
   model?: string;
   branch?: string;
@@ -156,6 +158,8 @@ export interface SWDReceipt {
   swd: {
     success: boolean;
     rolledBack: boolean;
+    rollbackStatus?: SWDRollbackStatus;
+    recoveryRequired?: boolean;
     errors: string[];
     rollbackErrors: string[];
   };
@@ -413,6 +417,8 @@ export function createSWDReceipt(input: SWDReceiptInput): SWDReceipt {
     swd: {
       success: input.result.success,
       rolledBack: input.result.rolledBack,
+      rollbackStatus: input.result.rollbackStatus,
+      recoveryRequired: input.result.recoveryRequired,
       errors: input.result.errors.map(redactReceiptSecrets),
       rollbackErrors: input.result.rollbackErrors.map(redactReceiptSecrets),
     },
@@ -596,6 +602,8 @@ export function listReceipts(limit = 10): ReceiptSummary[] {
       fileCount: receipt.fileCount,
       success: receipt.swd.success,
       rolledBack: receipt.swd.rolledBack,
+      rollbackStatus: receipt.swd.rollbackStatus,
+      recoveryRequired: receipt.swd.recoveryRequired,
       provider: receipt.provider?.providerId,
       model: receipt.provider?.modelId,
       branch: receipt.git?.branch,

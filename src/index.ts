@@ -54,6 +54,7 @@ export {
   type ActionResult,
   type VerificationStatus,
   type SWDRunResult,
+  type SWDRollbackStatus,
   type SWDOptions,
   type FileSnapshot,
   type FileSnapshotSummary,

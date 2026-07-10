@@ -3,10 +3,11 @@
 //  Strict Write Discipline — Production API (v1)
 // ─────────────────────────────────────────────────────────────
 
-import { readFileSync, writeFileSync, statSync, existsSync, unlinkSync, realpathSync, mkdirSync, rmdirSync, openSync, readSync, closeSync } from 'node:fs';
+import { readFileSync, statSync, existsSync, unlinkSync, rmdirSync, openSync, readSync, closeSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { resolve, relative, isAbsolute, dirname, basename, sep } from 'node:path';
-import { assertSafeRelativePathShape, isSafeRelativePathShape } from './path-safety.js';
+import { isSafeRelativePathShape } from './path-safety.js';
+import { PathJail } from './path-jail.js';
+import { AtomicFileWriter } from './atomic-writer.js';
 
 // ── Public Types ─────────────────────────────────────────────
 export type ActionIntent = 'MUTATE' | 'NOOP' | 'UNKNOWN';
@@ -34,15 +35,33 @@ export interface ActionResult {
   after?: FileSnapshotSummary;
 }
 
+export type SWDRollbackStatus =
+  | 'not-needed'
+  | 'disabled'
+  | 'complete'
+  | 'partial'
+  | 'failed';
+
 export interface SWDRunResult {
   success: boolean;
   results: ActionResult[];
+  /** Backwards-compatible flag: true when at least one mutation or directory was restored. */
   rolledBack: boolean;
-  rollbackErrors: string[]; // Added for auditability
+  rollbackErrors: string[];
+  /** Detailed rollback outcome emitted by SWDEngine. Optional for legacy serialized results. */
+  rollbackStatus?: SWDRollbackStatus;
+  /** True when committed filesystem state may require manual inspection or recovery. */
+  recoveryRequired?: boolean;
   errors: string[];
 }
 
 export interface SWDOptions {
+  /**
+   * Canonical repository root for every action in this engine instance.
+   * Captured when the engine is constructed so later process.cwd() changes do
+   * not silently move the filesystem boundary.
+   */
+  rootDir?: string;
   dryRun?: boolean;
   strict?: boolean;
   enableRollback?: boolean;
@@ -67,6 +86,8 @@ export interface FileSnapshot {
   mtime: number;
   hash: string;
   content: Buffer | null;
+  /** Permission bits captured for atomic replacement and rollback. */
+  mode: number | null;
 }
 
 export interface FileSnapshotSummary {
@@ -86,13 +107,14 @@ export const MAX_WRITABLE_ACTION_CONTENT_BYTES = 200_000;
 export const MAX_ROLLBACK_SNAPSHOT_BYTES = 50_000_000;
 
 /** Size of an existing file in bytes, or 0 if missing/unreadable. */
-function existingFileSize(unsafePath: string): number {
+function existingFileSize(pathJail: PathJail, unsafePath: string): number {
   try {
-    const abs = resolveSafePath(unsafePath);
+    const abs = pathJail.resolve(unsafePath);
     if (!existsSync(abs)) return 0;
     return statSync(abs).size;
   } catch {
-    // Path errors are surfaced later by executeAction; treat as non-blocking here.
+    // Path validation runs before this size check. Other stat failures are
+    // surfaced by the snapshot stage before any mutation occurs.
     return 0;
   }
 }
@@ -106,38 +128,18 @@ function largeWriteBlockedMessage(action: FileAction, bytes: number): string {
   return `Large full-file writes are blocked for ${action.path}: ${bytes} bytes exceeds ${MAX_WRITABLE_ACTION_CONTENT_BYTES}. Split the change into smaller edits.`;
 }
 
-/**
- * Like mkdirSync(dir, { recursive: true }), but returns the list of directories
- * that were actually created (deepest-first), so a rollback can remove exactly
- * those — and only if they remain empty. Never removes pre-existing dirs.
- */
-function ensureDirRecording(dir: string): string[] {
-  const missing: string[] = [];
-  let cur = dir;
-  // Walk upward collecting non-existent ancestors until we hit one that exists.
-  while (cur && !existsSync(cur)) {
-    missing.push(cur);
-    const parent = dirname(cur);
-    if (parent === cur) break; // reached filesystem root
-    cur = parent;
-  }
-  if (missing.length === 0) return missing;
-  mkdirSync(dir, { recursive: true });
-  // The upward walk pushed the deepest directory first, so `missing` is
-  // already deepest-first — exactly the order rollback needs to remove
-  // children before parents.
-  return missing;
-}
-
 // ── SWD Engine ───────────────────────────────────────────────
 /**
  * Authoritative filesystem execution kernel.
  * Lifecycle: Plan → Snapshot_Before → Execute → Snapshot_After → Verify → Commit/Rollback
  */
 export class SWDEngine {
-  private options: Required<SWDOptions>;
+  private options: Required<Omit<SWDOptions, 'rootDir'>>;
+  private readonly pathJail: PathJail;
+  private readonly atomicWriter = new AtomicFileWriter();
 
   constructor(options: SWDOptions = {}) {
+    this.pathJail = new PathJail(options.rootDir ?? process.cwd());
     this.options = {
       dryRun: options.dryRun ?? false,
       strict: options.strict ?? true,
@@ -151,7 +153,15 @@ export class SWDEngine {
 
   public async run(actions: FileAction[]): Promise<SWDRunResult> {
     if (actions.length === 0) {
-      return { success: true, results: [], rolledBack: false, rollbackErrors: [], errors: [] };
+      return {
+        success: true,
+        results: [],
+        rolledBack: false,
+        rollbackErrors: [],
+        rollbackStatus: 'not-needed',
+        recoveryRequired: false,
+        errors: [],
+      };
     }
 
     const largeWriteFailures = actions
@@ -169,7 +179,22 @@ export class SWDEngine {
         results: largeWriteFailures,
         rolledBack: false,
         rollbackErrors: [],
+        rollbackStatus: 'not-needed',
+        recoveryRequired: false,
         errors: largeWriteFailures.map(r => r.detail),
+      };
+    }
+
+    const pathFailures = this.validateActionPaths(actions);
+    if (pathFailures.length > 0) {
+      return {
+        success: false,
+        results: pathFailures,
+        rolledBack: false,
+        rollbackErrors: [],
+        rollbackStatus: 'not-needed',
+        recoveryRequired: false,
+        errors: pathFailures.map(result => result.detail),
       };
     }
 
@@ -178,7 +203,7 @@ export class SWDEngine {
     // target is never loaded into memory.
     const oversizedSnapshotFailures = actions
       .filter(action => action.operation === 'MODIFY' || action.operation === 'DELETE')
-      .map(action => ({ action, size: existingFileSize(action.path) }))
+      .map(action => ({ action, size: existingFileSize(this.pathJail, action.path) }))
       .filter(({ size }) => size > this.options.maxSnapshotBytes)
       .map(({ action, size }) => ({
         action,
@@ -195,11 +220,13 @@ export class SWDEngine {
         results: oversizedSnapshotFailures,
         rolledBack: false,
         rollbackErrors: [],
+        rollbackStatus: 'not-needed',
+        recoveryRequired: false,
         errors: oversizedSnapshotFailures.map(r => r.detail),
       };
     }
 
-    const context = new InternalSessionContext(this.options.maxSnapshotBytes);
+    const context = new InternalSessionContext(this.pathJail, this.options.maxSnapshotBytes);
     const results: ActionResult[] = [];
     const rollbackErrors: string[] = [];
     let overallSuccess = true;
@@ -221,7 +248,6 @@ export class SWDEngine {
           this.options.onAction(action);
           try {
             this.executeAction(action, context);
-            context.logExecution(action);
           } catch (err: any) {
             executionError = err instanceof Error ? err.message : String(err);
             overallSuccess = false;
@@ -289,58 +315,197 @@ export class SWDEngine {
       }
 
       // 4. ROLLBACK
-      let rolledBack = false;
-      if (!overallSuccess && this.options.enableRollback && !this.options.dryRun) {
-        const rbResult = this.performRollback(context);
-        rolledBack = rbResult.anyRolledBack;
-        rollbackErrors.push(...rbResult.errors);
-      }
+      const rollback = this.resolveRollbackOutcome(overallSuccess, context);
+      rollbackErrors.push(...rollback.errors);
 
       return {
         success: overallSuccess,
         results,
-        rolledBack,
+        rolledBack: rollback.anyRolledBack,
         rollbackErrors,
+        rollbackStatus: rollback.status,
+        recoveryRequired: rollback.recoveryRequired,
         errors: results.filter(r => ['failed', 'drift'].includes(r.status)).map(r => r.detail),
       };
 
-    } catch (err: any) {
-      return { success: false, results, rolledBack: false, rollbackErrors, errors: [err.message] };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.appendUnverifiedExecutionResults(context, results, message);
+
+      const rollback = this.resolveRollbackOutcome(false, context);
+      rollbackErrors.push(...rollback.errors);
+
+      const resultErrors = results
+        .filter(result => result.status === 'failed' || result.status === 'drift')
+        .map(result => result.detail);
+
+      return {
+        success: false,
+        results,
+        rolledBack: rollback.anyRolledBack,
+        rollbackErrors,
+        rollbackStatus: rollback.status,
+        recoveryRequired: rollback.recoveryRequired,
+        errors: [...new Set([...resultErrors, message])],
+      };
     }
   }
 
-  private executeAction(action: FileAction, ctx?: InternalSessionContext): void {
-    const absPath = resolveSafePath(action.path);
+  private validateActionPaths(actions: FileAction[]): ActionResult[] {
+    const failures: ActionResult[] = [];
+    const writableTargets = new Map<string, FileAction>();
+
+    for (const action of actions) {
+      let absolutePath: string;
+      try {
+        absolutePath = this.pathJail.resolve(action.path);
+      } catch (error: unknown) {
+        const detail = error instanceof Error ? error.message : String(error);
+        failures.push({ action, status: 'failed', detail });
+        continue;
+      }
+
+      if (action.operation === 'READ') continue;
+
+      const duplicateKey = process.platform === 'win32' || process.platform === 'darwin'
+        ? absolutePath.toLowerCase()
+        : absolutePath;
+      const previous = writableTargets.get(duplicateKey);
+      if (previous) {
+        failures.push({
+          action,
+          status: 'failed',
+          detail:
+            `Duplicate writable target '${action.path}' resolves to the same file as ` +
+            `'${previous.path}'. A batch may mutate each canonical path only once.`,
+        });
+        continue;
+      }
+
+      writableTargets.set(duplicateKey, action);
+    }
+
+    return failures;
+  }
+
+  private appendUnverifiedExecutionResults(
+    context: InternalSessionContext,
+    results: ActionResult[],
+    failureMessage: string,
+  ): void {
+    for (const action of context.logs.executionOrder) {
+      const existing = results.find(result => result.action === action);
+      if (existing) {
+        if (existing.status === 'verified' || existing.status === 'noop') {
+          existing.status = 'failed';
+          existing.detail = `${existing.detail} Batch aborted: ${failureMessage}; rollback attempted.`;
+        }
+        continue;
+      }
+      let before: FileSnapshotSummary | undefined;
+      try {
+        before = summarizeSnapshot(context.getSnapshot(action.path, 'before'));
+      } catch {
+        // The failure itself may be a path-safety error. Never allow audit
+        // enrichment to prevent the rollback attempt in the outer catch.
+      }
+      results.push({
+        action,
+        status: 'failed',
+        detail: `Applied but not fully verified: ${failureMessage}; rollback attempted.`,
+        before,
+      });
+    }
+  }
+
+  private executeAction(action: FileAction, ctx: InternalSessionContext): void {
     try {
+      let absPath = this.pathJail.resolve(action.path);
+      const before = ctx.getSnapshot(action.path, 'before');
+
       switch (action.operation) {
-        case 'CREATE':
+        case 'CREATE': {
           if (existsSync(absPath)) {
             throw new Error(`CREATE failed: file already exists at ${action.path}`);
           }
-          if (action.content !== undefined) {
-            // Ensure the parent directory exists so CREATE can target a new
-            // subdirectory. This mirrors the sandbox apply path and keeps the
-            // isolated-check gate equivalent to the real apply. Record any
-            // directories we actually create so rollback can remove the ones
-            // it leaves empty (best-effort; never fails the run).
-            const created = ensureDirRecording(dirname(absPath));
-            ctx?.recordCreatedDirs(created);
-            writeFileSync(absPath, action.content);
-          }
+          if (action.content === undefined) break;
+
+          this.pathJail.ensureParentDirectories(
+            absPath,
+            directory => ctx.recordCreatedDir(directory),
+          );
+          absPath = this.pathJail.resolve(action.path);
+
+          this.atomicWriter.write(absPath, action.content, {
+            createOnly: true,
+            afterTempCreated: tempPath => this.assertAtomicTempPath(tempPath),
+            beforeCommit: () => {
+              const commitPath = this.pathJail.resolve(action.path);
+              if (commitPath !== absPath || existsSync(commitPath)) {
+                throw new Error(`CREATE failed: file already exists at ${action.path}`);
+              }
+              this.assertUnchangedSinceSnapshot(action, before);
+            },
+            onCommitted: () => ctx.recordCommitted(action),
+          });
           break;
-        case 'MODIFY':
+        }
+
+        case 'MODIFY': {
           if (!existsSync(absPath)) {
             throw new Error(`MODIFY failed: file does not exist at ${action.path}`);
           }
-          if (action.content !== undefined) writeFileSync(absPath, action.content);
+          if (action.content === undefined) break;
+
+          const mode = statSync(absPath).mode;
+          this.atomicWriter.write(absPath, action.content, {
+            createOnly: false,
+            mode,
+            afterTempCreated: tempPath => this.assertAtomicTempPath(tempPath),
+            beforeCommit: () => {
+              const commitPath = this.pathJail.resolve(action.path);
+              if (commitPath !== absPath || !existsSync(commitPath)) {
+                throw new Error(`MODIFY failed: file does not exist at ${action.path}`);
+              }
+              this.assertUnchangedSinceSnapshot(action, before);
+            },
+            onCommitted: () => ctx.recordCommitted(action),
+          });
           break;
-        case 'DELETE':
-          if (existsSync(absPath)) unlinkSync(absPath);
+        }
+
+        case 'DELETE': {
+          if (!existsSync(absPath)) break;
+          absPath = this.pathJail.resolve(action.path);
+          this.assertUnchangedSinceSnapshot(action, before);
+          unlinkSync(absPath);
+          ctx.recordCommitted(action);
           break;
-        case 'READ': break;
+        }
+
+        case 'READ':
+          break;
       }
-    } catch (e: any) {
-      throw new Error(`Execution failed for ${action.path}: ${e.message}`);
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`Execution failed for ${action.path}: ${detail}`, { cause: error });
+    }
+  }
+
+  private assertAtomicTempPath(tempPath: string): void {
+    const safeTempPath = this.pathJail.resolve(tempPath);
+    if (safeTempPath !== tempPath) {
+      throw new Error(`Atomic staging path escaped the configured root: ${tempPath}`);
+    }
+  }
+
+  private assertUnchangedSinceSnapshot(action: FileAction, expected: FileSnapshot): void {
+    const absPath = this.pathJail.resolve(action.path);
+    const current = snapshotFile(absPath, { includeContent: false });
+    if (!snapshotStateMatches(current, expected)) {
+      throw new Error(
+        `Concurrency Drift: ${action.path} changed after the before-snapshot; refusing to ${action.operation}.`,
+      );
     }
   }
 
@@ -401,67 +566,156 @@ export class SWDEngine {
     );
   }
 
-  private performRollback(ctx: InternalSessionContext): { anyRolledBack: boolean, errors: string[] } {
+  private resolveRollbackOutcome(
+    overallSuccess: boolean,
+    ctx: InternalSessionContext,
+  ): {
+    status: SWDRollbackStatus;
+    anyRolledBack: boolean;
+    recoveryRequired: boolean;
+    errors: string[];
+  } {
+    if (overallSuccess || this.options.dryRun || !ctx.hasRollbackWork()) {
+      return {
+        status: 'not-needed',
+        anyRolledBack: false,
+        recoveryRequired: false,
+        errors: [],
+      };
+    }
+
+    if (!this.options.enableRollback) {
+      return {
+        status: 'disabled',
+        anyRolledBack: false,
+        recoveryRequired: true,
+        errors: ['Rollback was disabled after one or more filesystem mutations committed. Manual recovery is required.'],
+      };
+    }
+
+    const report = this.performRollback(ctx);
+    const status: SWDRollbackStatus = report.filesystemFailures === 0
+      ? 'complete'
+      : report.restoredCount > 0
+        ? 'partial'
+        : 'failed';
+
+    return {
+      status,
+      anyRolledBack: report.anyRolledBack,
+      recoveryRequired: report.filesystemFailures > 0,
+      errors: report.errors,
+    };
+  }
+
+  private performRollback(ctx: InternalSessionContext): {
+    anyRolledBack: boolean;
+    restoredCount: number;
+    filesystemFailures: number;
+    errors: string[];
+  } {
     const revOrder = [...ctx.logs.executionOrder].reverse();
     const seenPaths = new Set<string>();
     const errors: string[] = [];
     let anyRolledBack = false;
+    let restoredCount = 0;
+    let filesystemFailures = 0;
 
     for (const action of revOrder) {
-      // Mark the path seen up front so a path appearing twice in the execution
-      // order is attempted exactly once — even if that single attempt fails.
-      if (seenPaths.has(action.path)) continue;
-      seenPaths.add(action.path);
+      try {
+        const absPath = this.pathJail.resolve(action.path);
+        if (seenPaths.has(absPath)) continue;
+        seenPaths.add(absPath);
+        const original = ctx.logs.rollbackMap.get(absPath);
+        const committed = ctx.getCachedAfterSnapshot(action.path);
+        const current = snapshotFile(absPath, { includeContent: false });
 
-      const absPath = resolveSafePath(action.path);
-      const original = ctx.logs.rollbackMap.get(absPath);
-      const after = ctx.getCachedAfterSnapshot(action.path);
-      const current = snapshotFile(absPath, { includeContent: false });
+        if (!original) continue;
 
-      if (!original) continue;
-
-      if (current.hash === after.hash && current.exists === after.exists) {
-        try {
-          if (original.exists && original.content !== null) {
-            writeFileSync(absPath, original.content);
-          } else if (original.exists && original.content === null) {
-            throw new Error('original content was not captured because the snapshot exceeded the rollback content cap');
-          } else if (existsSync(absPath)) {
-            unlinkSync(absPath);
-          }
-          anyRolledBack = true;
-          this.options.onRollback(action.path, true);
-        } catch (e: any) {
-          const msg = `Rollback failed for ${action.path}: ${e.message}`;
-          errors.push(msg);
-          this.options.onRollback(action.path, false, e.message);
+        if (!snapshotStateMatches(current, committed)) {
+          throw new Error(`Concurrency Drift: Skipping rollback for ${action.path}`);
         }
-      } else {
-        const msg = `Concurrency Drift: Skipping rollback for ${action.path}`;
+
+        if (original.exists) {
+          if (original.content === null) {
+            throw new Error('original content was not captured because the snapshot exceeded the rollback content cap');
+          }
+
+          this.atomicWriter.write(absPath, original.content, {
+            createOnly: !current.exists,
+            mode: original.mode ?? undefined,
+            afterTempCreated: tempPath => this.assertAtomicTempPath(tempPath),
+            beforeCommit: () => {
+              const rollbackPath = this.pathJail.resolve(action.path);
+              if (rollbackPath !== absPath) {
+                throw new Error(`Rollback path changed for ${action.path}`);
+              }
+              const latest = snapshotFile(rollbackPath, { includeContent: false });
+              if (!snapshotStateMatches(latest, current)) {
+                throw new Error(`Concurrency Drift: Skipping rollback for ${action.path}`);
+              }
+            },
+          });
+        } else if (current.exists) {
+          const rollbackPath = this.pathJail.resolve(action.path);
+          const latest = snapshotFile(rollbackPath, { includeContent: false });
+          if (!snapshotStateMatches(latest, current)) {
+            throw new Error(`Concurrency Drift: Skipping rollback for ${action.path}`);
+          }
+          unlinkSync(rollbackPath);
+        }
+
+        anyRolledBack = true;
+        restoredCount += 1;
+        try {
+          this.options.onRollback(action.path, true);
+        } catch (hookError: unknown) {
+          const hookMessage = hookError instanceof Error ? hookError.message : String(hookError);
+          errors.push(`Rollback hook failed for ${action.path}: ${hookMessage}`);
+        }
+      } catch (error: unknown) {
+        filesystemFailures += 1;
+        const detail = error instanceof Error ? error.message : String(error);
+        const msg = detail.startsWith('Concurrency Drift:')
+          ? detail
+          : `Rollback failed for ${action.path}: ${detail}`;
         errors.push(msg);
-        this.options.onRollback(action.path, false, 'Concurrency drift detected');
+        try {
+          this.options.onRollback(action.path, false, detail);
+        } catch {
+          // Rollback hooks are advisory and must never replace the real error.
+        }
       }
     }
 
-    // Best-effort cleanup: remove directories this run created, deepest-first,
-    // but only while they are empty. A non-empty dir (pre-existing sibling
-    // files, or a file we couldn't roll back) is left untouched. Failures here
-    // never escalate — the file-level rollback above is the real guarantee.
+    // Remove only directories created by this run, deepest-first. A directory
+    // that gained external content is retained and reported as recovery work.
     for (const dir of ctx.logs.createdDirs) {
       try {
-        if (existsSync(dir)) rmdirSync(dir); // throws ENOTEMPTY if not empty
-      } catch {
-        // Non-empty or already gone — leave it.
+        const safeDir = this.pathJail.resolve(dir);
+        if (!existsSync(safeDir)) continue;
+        rmdirSync(safeDir);
+        anyRolledBack = true;
+        restoredCount += 1;
+      } catch (error: unknown) {
+        if (isMissingPathError(error)) continue;
+        filesystemFailures += 1;
+        const detail = error instanceof Error ? error.message : String(error);
+        errors.push(`Rollback could not remove created directory ${dir}: ${detail}`);
       }
     }
 
-    return { anyRolledBack, errors };
+    return { anyRolledBack, restoredCount, filesystemFailures, errors };
   }
+
 }
 
 // ── Internal Helpers ─────────────────────────────────────────
 class InternalSessionContext {
-  constructor(private readonly maxSnapshotBytes: number = MAX_ROLLBACK_SNAPSHOT_BYTES) {}
+  constructor(
+    private readonly pathJail: PathJail,
+    private readonly maxSnapshotBytes: number = MAX_ROLLBACK_SNAPSHOT_BYTES,
+  ) {}
   public snapshots = { before: new Map<string, FileSnapshot>(), after: new Map<string, FileSnapshot>() };
   public logs = {
     executionOrder: [] as FileAction[],
@@ -471,16 +725,14 @@ class InternalSessionContext {
     createdDirs: [] as string[],
   };
 
-  public recordCreatedDirs(dirs: string[]): void {
-    for (const dir of dirs) {
-      if (!this.logs.createdDirs.includes(dir)) this.logs.createdDirs.push(dir);
-    }
+  public recordCreatedDir(dir: string): void {
+    if (!this.logs.createdDirs.includes(dir)) this.logs.createdDirs.push(dir);
     // Keep deepest-first ordering by path length descending as a cheap proxy.
     this.logs.createdDirs.sort((a, b) => b.length - a.length);
   }
 
   public getSnapshot(path: string, type: 'before' | 'after'): FileSnapshot {
-    const absPath = resolveSafePath(path);
+    const absPath = this.pathJail.resolve(path);
 
     // 'before' snapshots are memoized — we always want the original pre-run state.
     if (type === 'before') {
@@ -498,62 +750,34 @@ class InternalSessionContext {
     return snap;
   }
 
-  public logExecution(action: FileAction): void { this.logs.executionOrder.push(action); }
+  public recordCommitted(action: FileAction): void {
+    this.logs.executionOrder.push(action);
+    // Capture the exact committed state immediately. If a later action throws
+    // before the verification pass, rollback must not treat a subsequent
+    // external edit as the state Mythos itself wrote.
+    this.getSnapshot(action.path, 'after');
+  }
 
   public getCachedAfterSnapshot(path: string): FileSnapshot {
-    const absPath = resolveSafePath(path);
+    const absPath = this.pathJail.resolve(path);
     return this.snapshots.after.get(absPath) ?? this.getSnapshot(path, 'after');
+  }
+
+  public hasRollbackWork(): boolean {
+    return this.logs.executionOrder.length > 0 || this.logs.createdDirs.length > 0;
   }
 }
 
-export function resolveSafePath(unsafePath: string): string {
-  const cwd = process.cwd();
-  const rawPath = unsafePath.trim();
-  if (rawPath.length === 0 || rawPath.includes('\0')) {
-    throw new Error(`SECURITY VIOLATION: Path traversal detected on '${unsafePath}'.`);
-  }
-  const normalizedRelativePath = rawPath.replace(/\\/g, '/');
-  let absPath: string;
-  if (isAbsolute(rawPath)) {
-    absPath = resolve(rawPath);
-  } else {
-    let safeRelativePath: string;
-    try {
-      safeRelativePath = assertSafeRelativePathShape(normalizedRelativePath, 'action path');
-    } catch {
-      throw new Error(`SECURITY VIOLATION: Path traversal detected on '${unsafePath}'.`);
-    }
-    absPath = resolve(cwd, safeRelativePath);
-  }
-  
-  let realPath = absPath;
-  try {
-    realPath = realpathSync(absPath);
-  } catch (e: any) {
-    if (e.code === 'ENOENT') {
-      const parentDir = dirname(absPath);
-      try {
-        realPath = resolve(realpathSync(parentDir), basename(absPath));
-      } catch {
-        // Fallback if parent also doesn't exist
-      }
-    }
-  }
+function snapshotStateMatches(left: FileSnapshot, right: FileSnapshot): boolean {
+  return left.exists === right.exists && left.hash === right.hash && left.mode === right.mode;
+}
 
-  const relPath = relative(cwd, realPath);
-  // Segment-based escape check. `startsWith('..')` would wrongly reject a
-  // legitimately-named file like `..foo.txt` (relPath === '..foo.txt'); only a
-  // real parent-escape — relPath of exactly '..' or a '..' path *segment* —
-  // should fail. This matches the shared path-shape validator, so every SWD
-  // input path accepts names like `backup..old.ts` and rejects real traversal.
-  const escapesRoot =
-    relPath === '..' ||
-    relPath.startsWith(`..${sep}`) ||
-    relPath.startsWith('../');
-  if (escapesRoot || isAbsolute(relPath)) {
-    throw new Error(`SECURITY VIOLATION: Path traversal detected on '${unsafePath}'.`);
-  }
-  return realPath;
+function isMissingPathError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+}
+
+export function resolveSafePath(unsafePath: string, rootDir: string = process.cwd()): string {
+  return new PathJail(rootDir).resolve(unsafePath);
 }
 
 export interface SnapshotFileOptions {
@@ -581,7 +805,7 @@ function hashFileSync(filePath: string): string {
 
 export function snapshotFile(filePath: string, options: SnapshotFileOptions = {}): FileSnapshot {
   try {
-    if (!existsSync(filePath)) return { path: filePath, exists: false, size: 0, mtime: 0, hash: '', content: null };
+    if (!existsSync(filePath)) return { path: filePath, exists: false, size: 0, mtime: 0, hash: '', content: null, mode: null };
     const stat = statSync(filePath);
     const includeContent = options.includeContent ?? true;
     const maxContentBytes = options.maxContentBytes ?? MAX_ROLLBACK_SNAPSHOT_BYTES;
@@ -589,14 +813,14 @@ export function snapshotFile(filePath: string, options: SnapshotFileOptions = {}
     if (includeContent && stat.size <= maxContentBytes) {
       const content = readFileSync(filePath);
       const hash = createHash('sha256').update(content).digest('hex');
-      return { path: filePath, exists: true, size: stat.size, mtime: stat.mtimeMs, hash, content };
+      return { path: filePath, exists: true, size: stat.size, mtime: stat.mtimeMs, hash, content, mode: stat.mode };
     }
 
     const hash = hashFileSync(filePath);
-    return { path: filePath, exists: true, size: stat.size, mtime: stat.mtimeMs, hash, content: null };
+    return { path: filePath, exists: true, size: stat.size, mtime: stat.mtimeMs, hash, content: null, mode: stat.mode };
   } catch (err: any) {
     if (err.code === 'ENOENT') {
-      return { path: filePath, exists: false, size: 0, mtime: 0, hash: '', content: null };
+      return { path: filePath, exists: false, size: 0, mtime: 0, hash: '', content: null, mode: null };
     }
     throw new Error(`Failed to snapshot file ${filePath}: ${err.message}`);
   }

@@ -10,8 +10,9 @@ import { reviewActions } from './security-policy.js';
 
 // ── Print verification results to terminal ───────────────────
 export function printSWDResults(result: SWDRunResult): void {
-  if (result.results.length === 0) return;
-  console.log(`\n${theme.muted}── SWD Verification ──${c.reset}`);
+  if (result.results.length === 0 && !result.rollbackStatus) return;
+  console.log(`
+${theme.muted}── SWD Verification ──${c.reset}`);
   for (const v of result.results) {
     const isDryRunPlan = v.detail.startsWith('Dry-run: planned ');
     const isOk = ['verified', 'noop'].includes(v.status);
@@ -22,9 +23,39 @@ export function printSWDResults(result: SWDRunResult): void {
         : `${theme.error}${icon.error}`;
     console.log(`  ${statusIcon}${c.reset} ${v.detail}`);
   }
-  if (result.rolledBack) {
-    console.log(`\n${theme.warning}${icon.rollback} TRANSACTION ROLLBACK${c.reset}`);
-    console.log(`  ${theme.muted}All operations reverted due to failure.${c.reset}`);
+
+  switch (result.rollbackStatus) {
+    case 'complete':
+      console.log(`
+${theme.warning}${icon.rollback} TRANSACTION ROLLBACK COMPLETE${c.reset}`);
+      console.log(`  ${theme.muted}All committed SWD mutations were reverted.${c.reset}`);
+      break;
+    case 'partial':
+      console.log(`
+${theme.error}${icon.rollback} TRANSACTION ROLLBACK PARTIAL${c.reset}`);
+      console.log(`  ${theme.warning}Some mutations were reverted; manual recovery is required.${c.reset}`);
+      break;
+    case 'failed':
+      console.log(`
+${theme.error}${icon.rollback} TRANSACTION ROLLBACK FAILED${c.reset}`);
+      console.log(`  ${theme.warning}Committed state remains; manual recovery is required.${c.reset}`);
+      break;
+    case 'disabled':
+      console.log(`
+${theme.warning}${icon.rollback} TRANSACTION ROLLBACK DISABLED${c.reset}`);
+      console.log(`  ${theme.warning}Committed state was intentionally left in place.${c.reset}`);
+      break;
+    default:
+      // Legacy SWDRunResult values may not contain rollbackStatus.
+      if (result.rolledBack) {
+        console.log(`
+${theme.warning}${icon.rollback} TRANSACTION ROLLBACK${c.reset}`);
+        console.log(`  ${theme.muted}Committed operations were reverted due to failure.${c.reset}`);
+      }
+  }
+
+  for (const rollbackError of result.rollbackErrors) {
+    console.log(`  ${theme.error}${icon.error}${c.reset} ${rollbackError}`);
   }
 }
 

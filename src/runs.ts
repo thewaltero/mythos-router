@@ -9,7 +9,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { redactReceiptSecrets } from './receipts.js';
-import type { FileAction } from './swd.js';
+import type { FileAction, SWDRollbackStatus } from './swd.js';
 import type { SandboxSummary, SWDApplyResult, TaskContractSummary } from './commands/swd.js';
 
 export const RUNS_DIR = '.mythos/runs';
@@ -45,6 +45,8 @@ export interface RunRecord {
   rejected: SWDApplyResult['rejected'];
   files: RunFileSummary[];
   rolledBack: boolean;
+  rollbackStatus?: SWDRollbackStatus;
+  recoveryRequired?: boolean;
   errors: string[];
   rollbackErrors: string[];
 }
@@ -61,6 +63,8 @@ export interface RunSummary {
   receiptId?: string;
   checked: boolean;
   rolledBack: boolean;
+  rollbackStatus?: SWDRollbackStatus;
+  recoveryRequired?: boolean;
   summary?: string;
 }
 
@@ -98,6 +102,8 @@ export function saveRunRecord(
     })),
     files,
     rolledBack: output.result.rolledBack,
+    rollbackStatus: output.result.rollbackStatus,
+    recoveryRequired: output.result.recoveryRequired,
     errors: output.result.errors.map(redactReceiptSecrets),
     rollbackErrors: output.result.rollbackErrors.map(redactReceiptSecrets),
   };
@@ -124,6 +130,8 @@ export function listRuns(limit = 10): RunSummary[] {
       receiptId: record.receipt?.id,
       checked: record.sandbox?.ran === true,
       rolledBack: record.rolledBack,
+      rollbackStatus: record.rollbackStatus,
+      recoveryRequired: record.recoveryRequired,
       summary: record.summary,
     }));
 }

@@ -24,6 +24,8 @@ describe('run outcome ledger', () => {
           success: true,
           rolledBack: false,
           rollbackErrors: [],
+          rollbackStatus: 'not-needed',
+          recoveryRequired: false,
           errors: [],
           results: [{
             action: {
@@ -48,10 +50,14 @@ describe('run outcome ledger', () => {
       const runs = listRuns();
       assert.equal(runs.length, 1);
       assert.equal(runs[0]?.agent, 'runs-agent');
+      assert.equal(runs[0]?.rollbackStatus, 'not-needed');
+      assert.equal(runs[0]?.recoveryRequired, false);
 
       const latest = readRun('latest');
       assert.equal(latest?.id, saved.id);
       assert.equal(latest?.files[0]?.path, 'src/run.ts');
+      assert.equal(latest?.rollbackStatus, 'not-needed');
+      assert.equal(latest?.recoveryRequired, false);
     } finally {
       process.chdir(previousCwd);
       rmSync(tempDir, { recursive: true, force: true });

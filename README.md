@@ -498,6 +498,9 @@ import { SWDEngine, parseActions } from 'mythos-router';
 
 // 1. Create an engine instance with your preferred options
 const engine = new SWDEngine({
+  // Recommended for embedded/long-running processes: bind SWD to an
+  // explicit repository root instead of relying on a mutable process cwd.
+  rootDir: process.cwd(),
   strict: true,
   enableRollback: true,
   onAction: (action) => console.log(`Executing: ${action.operation} ${action.path}`),
@@ -519,6 +522,23 @@ if (result.success) {
 }
 ```
 
+SWD canonicalizes `rootDir` when the engine is constructed and rejects action
+paths that escape it. Existing symbolic links are not followed in SWD action
+paths; a symlinked target or ancestor is rejected before mutation.
+
+CREATE and MODIFY content is staged in an exclusive temporary file in the same
+directory, flushed, and committed atomically. CREATE uses no-replace semantics,
+so a destination created concurrently is never overwritten; MODIFY preserves
+its existing permission bits. SWD also checks that the target still matches its
+before-snapshot immediately before commit, refusing to clobber a concurrent edit.
+
+`SWDRunResult.rollbackStatus` distinguishes `not-needed`, `disabled`, `complete`,
+`partial`, and `failed`. When `recoveryRequired` is `true`, committed filesystem
+state remains and should be inspected manually. The legacy `rolledBack` boolean
+remains available for compatibility. Persistent recovery after a process or
+machine crash requires the transaction journal planned for a later hardening
+phase; this release makes each individual CREATE/MODIFY commit atomic.
+
 
 ---
 
@@ -532,6 +552,7 @@ mythos-router/
 │   ├── client.ts        # Provider facade (Anthropic/OpenAI/DeepSeek BYOK routing)
 │   ├── budget.ts        # Session budget limiter (token cap, turn cap, progress bar)
 │   ├── swd.ts           # SWD execution kernel (engine, types, parsing, snapshots)
+│   ├── atomic-writer.ts # Same-directory flushed atomic CREATE/MODIFY commits
 │   ├── swd-cli.ts       # SWD terminal presentation (verification output, dry-run)
 │   ├── sandbox.ts       # Isolated temp repo copy gate for external-agent checks
 │   ├── receipts.ts      # SWD trust receipt creation, storage, and verification

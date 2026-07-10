@@ -109,15 +109,28 @@ function printRunSummary(run: RunSummary): void {
 
 function printRunHeader(run: RunRecord): void {
   console.log(`  ${c.dim}Time:${c.reset}      ${formatDate(run.timestamp)}`);
-  console.log(`  ${c.dim}Status:${c.reset}    ${run.ok ? theme.success + 'passed' : theme.error + 'failed'}${c.reset}${run.rolledBack ? ` ${theme.warning}(rolled back)${c.reset}` : ''}`);
+  console.log(`  ${c.dim}Status:${c.reset}    ${run.ok ? theme.success + 'passed' : theme.error + 'failed'}${c.reset}${formatRollbackSuffix(run.rollbackStatus, run.rolledBack)}`);
   console.log(`  ${c.dim}Mode:${c.reset}      ${run.mode}`);
   console.log(`  ${c.dim}Agent:${c.reset}     ${run.agent.id}/${run.agent.model}`);
   console.log(`  ${c.dim}Actions:${c.reset}   ${run.approvedCount}/${run.actionCount} approved`);
   console.log(`  ${c.dim}Receipt:${c.reset}   ${run.receipt?.id ?? 'none'}`);
   if (run.summary) console.log(`  ${c.dim}Summary:${c.reset}   ${run.summary}`);
+  if (run.recoveryRequired) {
+    console.log(`  ${c.dim}Recovery:${c.reset}  ${theme.warning}manual recovery required${c.reset}`);
+  }
   if (run.errors.length > 0) {
     console.log(`  ${c.dim}Errors:${c.reset}`);
     for (const err of run.errors) console.log(`    ${theme.error}${err}${c.reset}`);
+  }
+}
+
+function formatRollbackSuffix(status: RunRecord['rollbackStatus'], legacyRolledBack: boolean): string {
+  switch (status) {
+    case 'complete': return ` ${theme.warning}(rollback complete)${c.reset}`;
+    case 'partial': return ` ${theme.error}(rollback partial)${c.reset}`;
+    case 'failed': return ` ${theme.error}(rollback failed)${c.reset}`;
+    case 'disabled': return ` ${theme.warning}(rollback disabled)${c.reset}`;
+    default: return legacyRolledBack ? ` ${theme.warning}(rolled back)${c.reset}` : '';
   }
 }
 

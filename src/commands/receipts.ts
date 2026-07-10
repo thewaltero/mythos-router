@@ -332,7 +332,7 @@ function printReceiptHeader(receipt: SWDReceipt): void {
     : 'unknown';
 
   console.log(`  ${c.dim}Time:${c.reset}     ${formatDate(receipt.timestamp)}`);
-  console.log(`  ${c.dim}Status:${c.reset}   ${receipt.swd.success ? theme.success + 'verified' : theme.warning + 'issues'}${c.reset}${receipt.swd.rolledBack ? ` ${theme.warning}(rolled back)${c.reset}` : ''}`);
+  console.log(`  ${c.dim}Status:${c.reset}   ${receipt.swd.success ? theme.success + 'verified' : theme.warning + 'issues'}${c.reset}${formatReceiptRollbackSuffix(receipt)}`);
   console.log(`  ${c.dim}Summary:${c.reset}  ${receipt.summary}`);
   console.log(`  ${c.dim}Provider:${c.reset} ${provider}`);
   console.log(`  ${c.dim}Usage:${c.reset}    ${tokens} | ${cost}`);
@@ -341,13 +341,30 @@ function printReceiptHeader(receipt: SWDReceipt): void {
     const skills = receipt.skills.map((skill) => `${skill.id}@${skill.version} (${skill.source})`).join(', ');
     console.log(`  ${c.dim}Skills:${c.reset}   ${skills}`);
   }
+  if (receipt.swd.recoveryRequired) {
+    console.log(`  ${c.dim}Recovery:${c.reset} ${theme.warning}manual recovery required${c.reset}`);
+  }
   if (receipt.test) {
     console.log(`  ${c.dim}Test:${c.reset}     ${receipt.test.command} -> ${receipt.test.status}`);
   }
 }
 
+function formatReceiptRollbackSuffix(receipt: SWDReceipt): string {
+  switch (receipt.swd.rollbackStatus) {
+    case 'complete': return ` ${theme.warning}(rollback complete)${c.reset}`;
+    case 'partial': return ` ${theme.error}(rollback partial)${c.reset}`;
+    case 'failed': return ` ${theme.error}(rollback failed)${c.reset}`;
+    case 'disabled': return ` ${theme.warning}(rollback disabled)${c.reset}`;
+    default: return receipt.swd.rolledBack ? ` ${theme.warning}(rolled back)${c.reset}` : '';
+  }
+}
+
 function formatStatus(receipt: ReceiptSummary): string {
-  if (receipt.rolledBack) return `${theme.warning}ROLLBACK${c.reset}`;
+  if (receipt.rollbackStatus === 'partial' || receipt.rollbackStatus === 'failed') {
+    return `${theme.error}RECOVERY${c.reset}`;
+  }
+  if (receipt.rollbackStatus === 'disabled') return `${theme.warning}UNRECOVERED${c.reset}`;
+  if (receipt.rollbackStatus === 'complete' || receipt.rolledBack) return `${theme.warning}ROLLBACK${c.reset}`;
   return receipt.success ? `${theme.success}VERIFIED${c.reset}` : `${theme.warning}ISSUES${c.reset}`;
 }
 

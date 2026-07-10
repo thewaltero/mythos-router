@@ -82,7 +82,13 @@ export function formatReceiptMarkdown(receipt: SWDReceipt): string {
 
 function formatMarkdownStatus(receipt: SWDReceipt): string {
   const status = receipt.swd.success ? 'verified' : 'failed';
-  return receipt.swd.rolledBack ? `${status} (rolled back)` : status;
+  switch (receipt.swd.rollbackStatus) {
+    case 'complete': return `${status} (rollback complete)`;
+    case 'partial': return `${status} (rollback partial; recovery required)`;
+    case 'failed': return `${status} (rollback failed; recovery required)`;
+    case 'disabled': return `${status} (rollback disabled; recovery required)`;
+    default: return receipt.swd.rolledBack ? `${status} (rolled back)` : status;
+  }
 }
 
 function formatDate(timestamp: string): string {

@@ -126,6 +126,7 @@ describe('SWDEngine (Production v1 API)', () => {
       enableRollback: true,
       onVerify: () => {
         writeFileSync(fileA, 'external-change', 'utf-8');
+        throw new Error('verification observer failed after external edit');
       },
     });
 
@@ -133,12 +134,12 @@ describe('SWDEngine (Production v1 API)', () => {
       path: fileA,
       operation: 'MODIFY',
       intent: 'MUTATE',
-      contentHash: 'wrong_hash',
-      description: 'drift with external edit before rollback'
+      content: 'mythos-change',
+      description: 'committed write with external edit before rollback'
     }]);
 
     assert.strictEqual(result.success, false);
-    assert.strictEqual(result.results[0]?.status, 'drift');
+    assert.strictEqual(result.results[0]?.status, 'failed');
     assert.strictEqual(result.rolledBack, false);
     assert.match(result.rollbackErrors[0] ?? '', /Concurrency Drift/);
     assert.strictEqual(readFileSync(fileA, 'utf-8'), 'external-change');

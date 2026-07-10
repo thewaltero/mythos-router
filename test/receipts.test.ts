@@ -43,6 +43,8 @@ describe('SWD receipts', () => {
       success: true,
       rolledBack: false,
       rollbackErrors: [],
+      rollbackStatus: 'not-needed',
+      recoveryRequired: false,
       errors: [],
       results: [
         {
@@ -104,9 +106,13 @@ describe('SWD receipts', () => {
     const listed = listReceipts();
     assert.equal(listed.length, 1);
     assert.equal(listed[0]!.id, receipt.id);
+    assert.equal(listed[0]!.rollbackStatus, 'not-needed');
+    assert.equal(listed[0]!.recoveryRequired, false);
 
     const loaded = readReceipt(receipt.id);
     assert.equal(loaded?.id, receipt.id);
+    assert.equal(loaded?.swd.rollbackStatus, 'not-needed');
+    assert.equal(loaded?.swd.recoveryRequired, false);
     assert.equal(loaded ? verifyReceiptIntegrity(loaded) : false, true);
 
     const verification = verifyReceipt(receipt);
