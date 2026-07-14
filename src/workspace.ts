@@ -59,12 +59,30 @@ export function resolveWorkspace(input?: WorkspaceInput): WorkspaceContext {
   return new WorkspaceContext({ rootDir: input });
 }
 
+function trimBoundaryHyphens(value: string): string {
+  let start = 0;
+  let end = value.length;
+
+  while (start < end && value.charCodeAt(start) === 45) {
+    start += 1;
+  }
+
+  while (end > start && value.charCodeAt(end - 1) === 45) {
+    end -= 1;
+  }
+
+  if (start === 0 && end === value.length) {
+    return value;
+  }
+
+  return value.slice(start, end);
+}
+
 function createProjectId(projectName: string, canonicalRoot: string): string {
-  const slug = projectName
+  const normalizedName = projectName
     .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 48) || 'workspace';
+    .replace(/[^a-z0-9._-]+/g, '-');
+  const slug = trimBoundaryHyphens(normalizedName).slice(0, 48) || 'workspace';
   const digest = createHash('sha256').update(canonicalRoot).digest('hex').slice(0, 16);
   return `${slug}-${digest}`;
 }

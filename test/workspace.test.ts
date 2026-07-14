@@ -50,6 +50,18 @@ afterEach(() => {
 });
 
 describe('WorkspaceContext', () => {
+  it('normalizes hyphen-heavy project names without a backtracking trim regex', () => {
+    const home = tempDir('mythos-workspace-slug-home-');
+    const parent = tempDir('mythos-workspace-slug-parent-');
+    const root = join(parent, `${'-'.repeat(200)}project${'-'.repeat(40)}`);
+    mkdirSync(root);
+
+    const workspace = new WorkspaceContext({ rootDir: root, homeDir: home });
+
+    assert.equal(workspace.projectName, `${'-'.repeat(200)}project${'-'.repeat(40)}`);
+    assert.match(workspace.projectId, /^project-[a-f0-9]{16}$/);
+  });
+
   it('captures a canonical immutable root and separates same-named projects', () => {
     const home = tempDir('mythos-workspace-home-');
     const a = sameNamedWorkspace('mythos-workspace-a-', home);
