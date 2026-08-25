@@ -42,7 +42,8 @@
               "CREATE",
               "MODIFY",
               "DELETE",
-              "READ"
+              "READ",
+              "PATCH"
             ]
           }
         }

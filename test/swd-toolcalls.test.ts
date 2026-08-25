@@ -74,3 +74,26 @@ describe('actionsFromToolCalls', () => {
     assert.equal(fromTool[0].content, fromText[0].content);
   });
 });
+
+  it('normalizes PATCH tool calls with old/new', () => {
+    const [action] = actionsFromToolCalls({
+      path: 'src/x.ts',
+      operation: 'PATCH',
+      old: 'a',
+      new: 'b',
+      description: 'patch',
+    });
+    assert.equal(action.operation, 'PATCH');
+    assert.equal(action.old, 'a');
+    assert.equal(action.new, 'b');
+  });
+
+  it('drops incomplete PATCH tool calls', () => {
+    const actions = actionsFromToolCalls({
+      path: 'src/x.ts',
+      operation: 'PATCH',
+      old: 'a',
+      description: 'missing new',
+    });
+    assert.equal(actions.length, 0);
+  });

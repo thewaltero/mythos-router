@@ -193,7 +193,7 @@ export const fromText = true;
       actions: [{ path: 'a.ts', operation: 'create' }],
     }));
     assert.equal(lowerOperation.ok, false);
-    assert.match(lowerOperation.errors.join('\n'), /Expected one of: CREATE, MODIFY, DELETE, READ/);
+    assert.match(lowerOperation.errors.join('\n'), /Expected one of: CREATE, MODIFY, DELETE, READ, PATCH/);
 
     const lowerIntent = validateExternalAgentInput(JSON.stringify({
       actions: [{ path: 'a.ts', operation: 'CREATE', intent: 'mutate' }],
@@ -239,3 +239,27 @@ export const fromText = true;
   });
 
 });
+
+  it('accepts PATCH actions with old and new spans', () => {
+    const envelope = parseExternalAgentEnvelope(JSON.stringify({
+      actions: [{
+        path: 'src/lib.ts',
+        operation: 'PATCH',
+        description: 'rename',
+        old: 'foo',
+        new: 'bar',
+      }],
+    }));
+    assert.equal(envelope.actions[0]!.operation, 'PATCH');
+    assert.equal(envelope.actions[0]!.old, 'foo');
+    assert.equal(envelope.actions[0]!.new, 'bar');
+  });
+
+  it('rejects PATCH actions missing old or new', () => {
+    assert.throws(
+      () => parseExternalAgentEnvelope(JSON.stringify({
+        actions: [{ path: 'a.ts', operation: 'PATCH', description: 'bad', old: 'x' }],
+      })),
+      /both old and new/i,
+    );
+  });

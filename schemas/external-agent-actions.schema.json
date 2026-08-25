@@ -75,7 +75,8 @@
             "CREATE",
             "MODIFY",
             "DELETE",
-            "READ"
+            "READ",
+            "PATCH"
           ]
         },
         "intent": {
@@ -94,6 +95,18 @@
           "type": "string"
         },
         "contentHash": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "old": {
+          "type": "string",
+          "description": "Exact text to find for PATCH (must appear once)."
+        },
+        "new": {
+          "type": "string",
+          "description": "Replacement text for PATCH."
+        },
+        "beforeHash": {
           "type": "string",
           "pattern": "^[a-fA-F0-9]{64}$"
         }

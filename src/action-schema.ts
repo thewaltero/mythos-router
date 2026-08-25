@@ -15,12 +15,12 @@ export const MAX_AGENT_MODEL_LENGTH = 120;
 export const MAX_CONTRACT_PATTERNS = 100;
 export const MAX_CONTRACT_PATTERN_LENGTH = 240;
 
-const VALID_OPERATIONS = new Set<FileAction['operation']>(['CREATE', 'MODIFY', 'DELETE', 'READ']);
+const VALID_OPERATIONS = new Set<FileAction['operation']>(['CREATE', 'MODIFY', 'DELETE', 'READ', 'PATCH']);
 const VALID_INTENTS = new Set<FileAction['intent']>(['MUTATE', 'NOOP', 'UNKNOWN']);
 const ENVELOPE_COMMON_KEYS = ['request', 'summary', 'agent', 'metadata', 'contract'] as const;
 const ACTION_ENVELOPE_KEYS = [...ENVELOPE_COMMON_KEYS, 'actions'] as const;
 const TEXT_ENVELOPE_KEYS = [...ENVELOPE_COMMON_KEYS, 'output', 'text'] as const;
-const ACTION_KEYS = ['path', 'operation', 'intent', 'description', 'content', 'contentHash'] as const;
+const ACTION_KEYS = ['path', 'operation', 'intent', 'description', 'content', 'contentHash', 'old', 'new', 'beforeHash'] as const;
 const AGENT_KEYS = ['id', 'model'] as const;
 const CONTRACT_KEYS = ['allowedPaths', 'blockedPaths', 'requiredPaths', 'expectedOutputs'] as const;
 
@@ -105,11 +105,14 @@ export const EXTERNAL_AGENT_ACTION_SCHEMA = {
       required: ['path', 'operation'],
       properties: {
         path: { type: 'string', minLength: 1, maxLength: MAX_ACTION_PATH_LENGTH },
-        operation: { type: 'string', enum: ['CREATE', 'MODIFY', 'DELETE', 'READ'] },
+        operation: { type: 'string', enum: ['CREATE', 'MODIFY', 'DELETE', 'READ', 'PATCH'] },
         intent: { type: 'string', enum: ['MUTATE', 'NOOP', 'UNKNOWN'] },
         description: { type: 'string', maxLength: MAX_ACTION_DESCRIPTION_LENGTH },
         content: { type: 'string' },
         contentHash: { type: 'string', pattern: '^[a-fA-F0-9]{64}$' },
+        old: { type: 'string', description: 'Exact text to find for PATCH (must appear once).' },
+        new: { type: 'string', description: 'Replacement text for PATCH.' },
+        beforeHash: { type: 'string', pattern: '^[a-fA-F0-9]{64}$' },
       },
     },
     actionsEnvelope: {
@@ -411,6 +414,36 @@ function normalizeJsonAction(value: unknown): FileAction {
     action.contentHash = value.contentHash.toLowerCase();
   }
 
+  if (value.old !== undefined) {
+    if (typeof value.old !== 'string') {
+      throw new Error(`Invalid action old for ${path}: old must be a string.`);
+    }
+    action.old = value.old;
+  }
+
+  if (value.new !== undefined) {
+    if (typeof value.new !== 'string') {
+      throw new Error(`Invalid action new for ${path}: new must be a string.`);
+    }
+    action.new = value.new;
+  }
+
+  if (value.beforeHash !== undefined) {
+    if (typeof value.beforeHash !== 'string' || !/^[a-f0-9]{64}$/i.test(value.beforeHash)) {
+      throw new Error(`Invalid action beforeHash for ${path}: expected 64 hex characters.`);
+    }
+    action.beforeHash = value.beforeHash.toLowerCase();
+  }
+
+  if (operation === 'PATCH') {
+    if (action.old === undefined || action.new === undefined) {
+      throw new Error(`Invalid PATCH action for ${path}: both old and new are required.`);
+    }
+    if (action.old.length === 0) {
+      throw new Error(`Invalid PATCH action for ${path}: old must be non-empty.`);
+    }
+  }
+
   return action;
 }
 
@@ -434,11 +467,23 @@ function validateParsedTextAction(action: FileAction): FileAction {
   if (action.contentHash !== undefined && !/^[a-f0-9]{64}$/i.test(action.contentHash)) {
     throw new Error(`Invalid action contentHash for ${path}: expected 64 hex characters.`);
   }
+  if (action.beforeHash !== undefined && !/^[a-f0-9]{64}$/i.test(action.beforeHash)) {
+    throw new Error(`Invalid action beforeHash for ${path}: expected 64 hex characters.`);
+  }
+  if (action.operation === 'PATCH') {
+    if (action.old === undefined || action.new === undefined) {
+      throw new Error(`Invalid PATCH action for ${path}: both old and new are required.`);
+    }
+    if (action.old.length === 0) {
+      throw new Error(`Invalid PATCH action for ${path}: old must be non-empty.`);
+    }
+  }
   return {
     ...action,
     path,
     description,
     contentHash: action.contentHash?.toLowerCase(),
+    beforeHash: action.beforeHash?.toLowerCase(),
   };
 }
 

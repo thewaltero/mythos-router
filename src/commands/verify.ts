@@ -15,7 +15,7 @@ type MemoryEntry = {
 
 type FileMetadata = Record<string, string>;
 
-type FileOperation = 'CREATE' | 'MODIFY' | 'DELETE' | 'READ';
+type FileOperation = 'CREATE' | 'MODIFY' | 'DELETE' | 'READ' | 'PATCH';
 
 interface ActionReference {
   operation: FileOperation;
@@ -161,7 +161,7 @@ function extractMentionedPaths(entries: MemoryEntry[], cwd: string): Set<string>
 
 function parseActionReferences(action: string, cwd: string): ActionReference[] {
   const refs: ActionReference[] = [];
-  const re = /(CREATE|MODIFY|DELETE|READ):\s*([^;|]+)(?:;|$)/gi;
+  const re = /(CREATE|MODIFY|DELETE|READ|PATCH):\s*([^;|]+)(?:;|$)/gi;
 
   for (const match of action.matchAll(re)) {
     const operation = match[1]?.toUpperCase() as FileOperation | undefined;

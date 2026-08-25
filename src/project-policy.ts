@@ -48,7 +48,7 @@ export interface ProjectPolicyDecision {
   reason: string;
 }
 
-const VALID_OPERATIONS = new Set<ProjectPolicyOperation>(['CREATE', 'MODIFY', 'DELETE', 'READ']);
+const VALID_OPERATIONS = new Set<ProjectPolicyOperation>(['CREATE', 'MODIFY', 'DELETE', 'READ', 'PATCH']);
 const PROJECT_POLICY_KEYS = ['version', 'block', 'confirm', 'limits', 'checks'] as const;
 const POLICY_LIMIT_KEYS = ['allowDeletes', 'maxActions', 'maxActionContentBytes', 'allowedOperations'] as const;
 const POLICY_CHECK_KEYS = ['name', 'command'] as const;
@@ -78,7 +78,7 @@ export const PROJECT_POLICY_SCHEMA = {
         allowedOperations: {
           type: 'array',
           maxItems: 4,
-          items: { type: 'string', enum: ['CREATE', 'MODIFY', 'DELETE', 'READ'] },
+          items: { type: 'string', enum: ['CREATE', 'MODIFY', 'DELETE', 'READ', 'PATCH'] },
         },
       },
     },
@@ -193,7 +193,7 @@ export function evaluateProjectPolicyAction(action: FileAction, state: ProjectPo
 
   const maxBytes = limits?.maxActionContentBytes;
   if (maxBytes !== undefined && isWritableAction(action)) {
-    const bytes = Buffer.byteLength(action.content ?? '', 'utf8');
+    const bytes = writableActionBytes(action);
     if (bytes > maxBytes) {
       return {
         risk: 'block',
@@ -343,7 +343,7 @@ function validateLimits(value: Record<string, unknown>): string[] {
     } else {
       for (const op of value.allowedOperations) {
         if (typeof op !== 'string' || !VALID_OPERATIONS.has(op as ProjectPolicyOperation)) {
-          errors.push('limits.allowedOperations may only include CREATE, MODIFY, DELETE, or READ.');
+          errors.push('limits.allowedOperations may only include CREATE, MODIFY, DELETE, READ, or PATCH.');
           break;
         }
       }
@@ -470,7 +470,17 @@ export function normalizePolicyPath(filePath: string): string {
 }
 
 function isWritableAction(action: FileAction): boolean {
+  if (action.operation === 'PATCH') {
+    return action.old !== undefined && action.new !== undefined;
+  }
   return (action.operation === 'CREATE' || action.operation === 'MODIFY') && action.content !== undefined;
+}
+
+function writableActionBytes(action: FileAction): number {
+  if (action.operation === 'PATCH') {
+    return Buffer.byteLength(action.old ?? '', 'utf8') + Buffer.byteLength(action.new ?? '', 'utf8');
+  }
+  return Buffer.byteLength(action.content ?? '', 'utf8');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

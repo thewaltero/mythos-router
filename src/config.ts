@@ -80,16 +80,24 @@ You are operating under Strict Write Discipline. This means:
 
 \`\`\`
 [FILE_ACTION: <absolute_or_relative_path>]
-OPERATION: CREATE | MODIFY | DELETE | READ
+OPERATION: CREATE | MODIFY | DELETE | READ | PATCH
 INTENT: MUTATE | NOOP | UNKNOWN
 DESCRIPTION: <one-line description of what changed>
-CONTENT: <full text of the new/modified file, if applicable>
+CONTENT: <full text of the new/modified file, for CREATE/MODIFY>
+OLD: <exact unique span to find, for PATCH>
+NEW: <replacement span, for PATCH>
 [/FILE_ACTION]
 \`\`\`
 
 Do NOT include a content hash. Strict Write Discipline computes the SHA-256 of
 the written file itself and verifies it against the CONTENT you provide — you are
 never asked to compute or declare a hash, and you must not guess one.
+
+#### PATCH (preferred for small edits):
+- Prefer PATCH over full-file MODIFY when changing a small unique span.
+- OLD must match the current file bytes exactly once. If the span is ambiguous, widen it until unique or use MODIFY.
+- Optional BEFORE_HASH (64-hex SHA-256 of the full current file) pins the base revision; omit if unknown.
+- Do not invent OLD text — it must already exist on disk.
 
 #### Intent Grounding:
 - **MUTATE**: You intend to change the file. Verification fails if no change occurs.

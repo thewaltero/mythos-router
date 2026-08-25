@@ -20,7 +20,7 @@ export const FILE_ACTION_TOOL: ToolDefinition = {
   name: FILE_ACTION_TOOL_NAME,
   description:
     'Create, modify, or delete files to accomplish the task. Every file change MUST go through this tool. ' +
-    'Always provide the complete file content for CREATE and MODIFY operations.',
+    'For CREATE/MODIFY provide the complete file content. For PATCH provide exact old/new spans (old must match once).',
   inputSchema: {
     type: 'object',
     properties: {
@@ -31,13 +31,16 @@ export const FILE_ACTION_TOOL: ToolDefinition = {
           type: 'object',
           properties: {
             path: { type: 'string', description: 'Repository-relative path.' },
-            operation: { type: 'string', enum: ['CREATE', 'MODIFY', 'DELETE'] },
+            operation: { type: 'string', enum: ['CREATE', 'MODIFY', 'DELETE', 'PATCH'] },
             intent: {
               type: 'string',
               enum: ['MUTATE', 'NOOP'],
               description: 'MUTATE if the file content should change; NOOP for a read-only touch.',
             },
             content: { type: 'string', description: 'Full file content for CREATE/MODIFY.' },
+            old: { type: 'string', description: 'Exact text to find for PATCH (must appear once in the file).' },
+            new: { type: 'string', description: 'Replacement text for PATCH.' },
+            beforeHash: { type: 'string', description: 'Optional SHA-256 of the full file before PATCH.' },
             description: { type: 'string', description: 'One-line summary of the change.' },
           },
           required: ['path', 'operation', 'description'],

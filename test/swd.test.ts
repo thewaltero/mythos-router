@@ -347,3 +347,137 @@ describe('parseActions intent defaults', () => {
     assert.strictEqual(actions[0].intent, 'MUTATE');
   });
 });
+
+describe('PATCH operations', () => {
+  const testDir = join(process.cwd(), 'test', '.tmp-swd-patch');
+
+  it('parses a PATCH FILE_ACTION block with OLD/NEW spans', () => {
+    const output = `
+[FILE_ACTION: src/app.ts]
+OPERATION: PATCH
+INTENT: MUTATE
+DESCRIPTION: Rename helper
+OLD:
+function foo() {
+  return 1;
+}
+NEW:
+function bar() {
+  return 1;
+}
+[/FILE_ACTION]
+`;
+    const actions = parseActions(output);
+    assert.equal(actions.length, 1);
+    assert.equal(actions[0]!.operation, 'PATCH');
+    assert.equal(actions[0]!.old, 'function foo() {\n  return 1;\n}');
+    assert.equal(actions[0]!.new, 'function bar() {\n  return 1;\n}');
+  });
+
+  it('applies a unique-span PATCH and verifies the result', async () => {
+    mkdirSync(testDir, { recursive: true });
+    const fileA = join(testDir, 'patch-ok.ts');
+    writeFileSync(fileA, 'const a = 1;\nconst b = 2;\n', 'utf-8');
+
+    const engine = new SWDEngine({ rootDir: testDir, enableRollback: true });
+    const result = await engine.run([{
+      path: 'patch-ok.ts',
+      operation: 'PATCH',
+      intent: 'MUTATE',
+      description: 'change b',
+      old: 'const b = 2;',
+      new: 'const b = 3;',
+    }]);
+
+    assert.equal(result.success, true);
+    assert.equal(result.results[0]?.status, 'verified');
+    assert.equal(readFileSync(fileA, 'utf-8'), 'const a = 1;\nconst b = 3;\n');
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('fails closed when the OLD span is not unique', async () => {
+    mkdirSync(testDir, { recursive: true });
+    const fileA = join(testDir, 'patch-dup.ts');
+    writeFileSync(fileA, 'x = 1;\nx = 1;\n', 'utf-8');
+
+    const engine = new SWDEngine({ rootDir: testDir, enableRollback: true });
+    const result = await engine.run([{
+      path: 'patch-dup.ts',
+      operation: 'PATCH',
+      intent: 'MUTATE',
+      description: 'ambiguous',
+      old: 'x = 1;',
+      new: 'x = 2;',
+    }]);
+
+    assert.equal(result.success, false);
+    assert.match(result.results[0]?.detail ?? '', /not unique|more than once/i);
+    assert.equal(readFileSync(fileA, 'utf-8'), 'x = 1;\nx = 1;\n');
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('fails closed when the OLD span is missing', async () => {
+    mkdirSync(testDir, { recursive: true });
+    const fileA = join(testDir, 'patch-missing.ts');
+    writeFileSync(fileA, 'hello\n', 'utf-8');
+
+    const engine = new SWDEngine({ rootDir: testDir, enableRollback: true });
+    const result = await engine.run([{
+      path: 'patch-missing.ts',
+      operation: 'PATCH',
+      intent: 'MUTATE',
+      description: 'missing',
+      old: 'goodbye',
+      new: 'farewell',
+    }]);
+
+    assert.equal(result.success, false);
+    assert.match(result.results[0]?.detail ?? '', /not found/i);
+    assert.equal(readFileSync(fileA, 'utf-8'), 'hello\n');
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('honors beforeHash and refuses a stale base', async () => {
+    mkdirSync(testDir, { recursive: true });
+    const fileA = join(testDir, 'patch-hash.ts');
+    writeFileSync(fileA, 'alpha\n', 'utf-8');
+
+    const engine = new SWDEngine({ rootDir: testDir, enableRollback: true });
+    const result = await engine.run([{
+      path: 'patch-hash.ts',
+      operation: 'PATCH',
+      intent: 'MUTATE',
+      description: 'stale base',
+      old: 'alpha',
+      new: 'beta',
+      beforeHash: '0'.repeat(64),
+    }]);
+
+    assert.equal(result.success, false);
+    assert.match(result.results[0]?.detail ?? '', /beforeHash mismatch/i);
+    assert.equal(readFileSync(fileA, 'utf-8'), 'alpha\n');
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('rolls back a PATCH that claims MUTATE but produces no change', async () => {
+    mkdirSync(testDir, { recursive: true });
+    const fileA = join(testDir, 'patch-noop.ts');
+    writeFileSync(fileA, 'same\n', 'utf-8');
+
+    const engine = new SWDEngine({ rootDir: testDir, enableRollback: true });
+    const result = await engine.run([{
+      path: 'patch-noop.ts',
+      operation: 'PATCH',
+      intent: 'MUTATE',
+      description: 'noop patch',
+      old: 'same',
+      new: 'same',
+    }]);
+
+    assert.equal(result.success, false);
+    assert.equal(result.results[0]?.status, 'failed');
+    assert.match(result.results[0]?.detail ?? '', /Intent mismatch/i);
+    assert.equal(readFileSync(fileA, 'utf-8'), 'same\n');
+    rmSync(testDir, { recursive: true, force: true });
+  });
+});

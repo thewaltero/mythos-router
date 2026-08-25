@@ -15,11 +15,27 @@ export type ActionIntent = 'MUTATE' | 'NOOP' | 'UNKNOWN';
 
 export interface FileAction {
   path: string;
-  operation: 'CREATE' | 'MODIFY' | 'DELETE' | 'READ';
+  operation: 'CREATE' | 'MODIFY' | 'DELETE' | 'READ' | 'PATCH';
   intent: ActionIntent;
   content?: string;
   contentHash?: string;
   description?: string;
+  /**
+   * Exact substring to find for PATCH. Must appear exactly once in the target
+   * file. Required for PATCH; ignored for other operations.
+   */
+  old?: string;
+  /**
+   * Replacement substring for PATCH. Required for PATCH (may be empty to
+   * delete the matched span). Ignored for other operations.
+   */
+  new?: string;
+  /**
+   * Optional SHA-256 of the full file *before* a PATCH. When set, SWD refuses
+   * the patch unless the on-disk before-state matches — so a stale agent
+   * cannot apply a hunk against the wrong base.
+   */
+  beforeHash?: string;
 }
 
 export type VerificationStatus =
@@ -67,7 +83,7 @@ export interface SWDOptions {
   strict?: boolean;
   enableRollback?: boolean;
   /**
-   * Maximum size (bytes) of an existing file that MODIFY/DELETE may target.
+   * Maximum size (bytes) of an existing file that MODIFY/DELETE/PATCH may target.
    * The original content is held in memory to enable rollback, so oversized
    * targets are blocked fail-closed instead of risking memory pressure.
    * Defaults to MAX_ROLLBACK_SNAPSHOT_BYTES. Raise it only when you knowingly
@@ -121,12 +137,53 @@ function existingFileSize(pathJail: PathJail, unsafePath: string): number {
 }
 
 function getWritableActionContentBytes(action: FileAction): number {
+  if (action.operation === 'PATCH') {
+    const oldBytes = action.old !== undefined ? Buffer.byteLength(action.old, 'utf8') : 0;
+    const newBytes = action.new !== undefined ? Buffer.byteLength(action.new, 'utf8') : 0;
+    return oldBytes + newBytes;
+  }
   if (!['CREATE', 'MODIFY'].includes(action.operation) || action.content === undefined) return 0;
   return Buffer.byteLength(action.content, 'utf8');
 }
 
 function largeWriteBlockedMessage(action: FileAction, bytes: number): string {
+  if (action.operation === 'PATCH') {
+    return (
+      `Large PATCH payloads are blocked for ${action.path}: ${bytes} bytes (old+new) exceeds ` +
+      `${MAX_WRITABLE_ACTION_CONTENT_BYTES}. Use a smaller unique span.`
+    );
+  }
   return `Large full-file writes are blocked for ${action.path}: ${bytes} bytes exceeds ${MAX_WRITABLE_ACTION_CONTENT_BYTES}. Split the change into smaller edits.`;
+}
+
+/**
+ * Apply a single exact-text replacement. The `old` span must appear exactly
+ * once in `source` — zero matches and multiple matches both fail closed so a
+ * PATCH cannot silently hit the wrong region or no-op under MUTATE intent.
+ */
+export function applyExactPatch(
+  source: string,
+  oldText: string,
+  newText: string,
+): { ok: true; result: string } | { ok: false; reason: string } {
+  if (oldText.length === 0) {
+    return { ok: false, reason: 'PATCH old text must be non-empty.' };
+  }
+  const first = source.indexOf(oldText);
+  if (first === -1) {
+    return { ok: false, reason: 'PATCH old text was not found in the file.' };
+  }
+  const second = source.indexOf(oldText, first + oldText.length);
+  if (second !== -1) {
+    return {
+      ok: false,
+      reason: 'PATCH old text is not unique in the file (appears more than once).',
+    };
+  }
+  return {
+    ok: true,
+    result: source.slice(0, first) + newText + source.slice(first + oldText.length),
+  };
 }
 
 // ── SWD Engine ───────────────────────────────────────────────
@@ -203,7 +260,7 @@ export class SWDEngine {
     // for rollback. We only stat() here (no content read), so an oversized
     // target is never loaded into memory.
     const oversizedSnapshotFailures = actions
-      .filter(action => action.operation === 'MODIFY' || action.operation === 'DELETE')
+      .filter(action => action.operation === 'MODIFY' || action.operation === 'DELETE' || action.operation === 'PATCH')
       .map(action => ({ action, size: existingFileSize(this.pathJail, action.path) }))
       .filter(({ size }) => size > this.options.maxSnapshotBytes)
       .map(({ action, size }) => ({
@@ -513,6 +570,47 @@ export class SWDEngine {
           break;
         }
 
+        case 'PATCH': {
+          if (!existsSync(absPath)) {
+            throw new Error(`PATCH failed: file does not exist at ${action.path}`);
+          }
+          if (action.old === undefined || action.new === undefined) {
+            throw new Error(`PATCH failed: both old and new text are required for ${action.path}`);
+          }
+          if (action.beforeHash && before.hash !== action.beforeHash.toLowerCase()) {
+            throw new Error(
+              `PATCH failed: beforeHash mismatch for ${action.path}: ` +
+              `expected ${action.beforeHash.slice(0, 12)}…, got ${before.hash.slice(0, 12)}…`,
+            );
+          }
+          if (before.content === null) {
+            throw new Error(
+              `PATCH failed: cannot load existing content for ${action.path} ` +
+              `(file exceeds rollback snapshot cap).`,
+            );
+          }
+          const source = before.content.toString('utf8');
+          const applied = applyExactPatch(source, action.old, action.new);
+          if (!applied.ok) {
+            throw new Error(`PATCH failed for ${action.path}: ${applied.reason}`);
+          }
+          const mode = statSync(absPath).mode;
+          this.atomicWriter.write(absPath, applied.result, {
+            createOnly: false,
+            mode,
+            afterTempCreated: tempPath => this.assertAtomicTempPath(tempPath),
+            beforeCommit: () => {
+              const commitPath = this.pathJail.resolve(action.path);
+              if (commitPath !== absPath || !existsSync(commitPath)) {
+                throw new Error(`PATCH failed: file does not exist at ${action.path}`);
+              }
+              this.assertUnchangedSinceSnapshot(action, before);
+            },
+            onCommitted: () => ctx.recordCommitted(action),
+          });
+          break;
+        }
+
         case 'DELETE': {
           if (!existsSync(absPath)) break;
           absPath = this.pathJail.resolve(action.path);
@@ -567,6 +665,25 @@ export class SWDEngine {
         break;
       case 'MODIFY':
         if (!after.exists) return result('failed', `File missing after MODIFY: ${action.path}`);
+        break;
+      case 'PATCH':
+        if (!before.exists) return result('drift', `PATCH on non-existent file: ${action.path}`);
+        if (!after.exists) return result('failed', `File missing after PATCH: ${action.path}`);
+        if (action.old !== undefined && action.new !== undefined && before.content !== null) {
+          const source = before.content.toString('utf8');
+          const applied = applyExactPatch(source, action.old, action.new);
+          if (!applied.ok) {
+            return result('failed', `PATCH verification failed for ${action.path}: ${applied.reason}`);
+          }
+          const expectedHash = createHash('sha256').update(applied.result, 'utf8').digest('hex');
+          if (after.hash !== expectedHash) {
+            return result(
+              'drift',
+              `Written content does not match patched content for ${action.path}: ` +
+              `expected ${expectedHash.slice(0, 12)}…, got ${after.hash.slice(0, 12)}…`,
+            );
+          }
+        }
         break;
       case 'DELETE':
         if (!before.exists) return result('drift', `DELETE on non-existent file: ${action.path}`);
@@ -970,12 +1087,17 @@ export function parseActions(output: string): FileAction[] {
     const block = output.slice(startIdx, endIdx + END_TAG.length);
     cursor = endIdx + END_TAG.length;
 
-    // Header region: everything before the line-start CONTENT: marker (or the
-    // whole block when there is no content). Restricting field extraction to
-    // the header prevents lines *inside file content* that happen to start
-    // with "OPERATION:" / "DESCRIPTION:" etc. from being read as fields.
+    // Header region: everything before the first body marker (CONTENT: for
+    // full-file writes, or OLD: for PATCH). Restricting field extraction to
+    // the header prevents lines *inside* body text that happen to start with
+    // "OPERATION:" / "DESCRIPTION:" etc. from being read as fields.
     const contentMarkerIdx = nextLineStartIndex(block, 'CONTENT:', 0);
-    const headerRegion = contentMarkerIdx === -1 ? block : block.slice(0, contentMarkerIdx);
+    const oldMarkerIdx = nextLineStartIndex(block, 'OLD:', 0);
+    const bodyMarkerCandidates = [contentMarkerIdx, oldMarkerIdx].filter(i => i !== -1);
+    const bodyMarkerIdx = bodyMarkerCandidates.length === 0
+      ? -1
+      : Math.min(...bodyMarkerCandidates);
+    const headerRegion = bodyMarkerIdx === -1 ? block : block.slice(0, bodyMarkerIdx);
     const lines = headerRegion.split(/\r?\n/).map(l => l.trim());
 
     // 1. Extract Path from the start tag line
@@ -992,6 +1114,7 @@ export function parseActions(output: string): FileAction[] {
     const operation = getField('OPERATION:');
     const intent = getField('INTENT:');
     const contentHash = getField('CONTENT_HASH:');
+    const beforeHash = getField('BEFORE_HASH:');
     const description = getField('DESCRIPTION:');
 
     // 3. Extract multi-line Content — from the line-start CONTENT: marker up
@@ -1005,6 +1128,26 @@ export function parseActions(output: string): FileAction[] {
       content = rawContent;
     }
 
+    // 4. Extract PATCH old/new spans. OLD: runs until the line-start NEW:
+    // marker; NEW: runs until the block END_TAG. Both markers must be at line
+    // starts so body text can contain the words OLD:/NEW: mid-line.
+    let oldText: string | undefined;
+    let newText: string | undefined;
+    if (oldMarkerIdx !== -1) {
+      const newMarkerIdx = nextLineStartIndex(block, 'NEW:', oldMarkerIdx + 'OLD:'.length);
+      if (newMarkerIdx !== -1) {
+        let rawOld = block.slice(oldMarkerIdx + 'OLD:'.length, newMarkerIdx);
+        rawOld = rawOld.replace(/^[ \t]*\r?\n/, '');
+        rawOld = rawOld.replace(/\r?\n[ \t]*$/, '');
+        oldText = rawOld;
+
+        let rawNew = block.slice(newMarkerIdx + 'NEW:'.length, block.lastIndexOf(END_TAG));
+        rawNew = rawNew.replace(/^[ \t]*\r?\n/, '');
+        rawNew = rawNew.replace(/\r?\n[ \t]*$/, '');
+        newText = rawNew;
+      }
+    }
+
     if (path && operation && description) {
       // Segment-based traversal check shared with the tool-call normalizer.
       if (!isPathShapeSafe(path)) {
@@ -1012,18 +1155,28 @@ export function parseActions(output: string): FileAction[] {
       }
 
       const opUpper = operation.toUpperCase();
-      if (!['CREATE', 'MODIFY', 'DELETE', 'READ'].includes(opUpper)) {
+      if (!['CREATE', 'MODIFY', 'DELETE', 'READ', 'PATCH'].includes(opUpper)) {
         continue;
       }
 
-      actions.push({
+      // PATCH requires both old and new spans; drop incomplete blocks the same
+      // way we drop blocks with an unknown operation.
+      if (opUpper === 'PATCH' && (oldText === undefined || newText === undefined)) {
+        continue;
+      }
+
+      const action: FileAction = {
         path,
         operation: opUpper as FileAction['operation'],
         intent: resolveActionIntent(opUpper, intent),
         contentHash,
         description,
         content,
-      });
+      };
+      if (oldText !== undefined) action.old = oldText;
+      if (newText !== undefined) action.new = newText;
+      if (beforeHash) action.beforeHash = beforeHash.toLowerCase();
+      actions.push(action);
     }
   }
   return actions;
@@ -1037,6 +1190,9 @@ export interface ToolCallFileAction {
   description?: string;
   content?: string;
   contentHash?: string;
+  old?: string;
+  new?: string;
+  beforeHash?: string;
 }
 
 /**
@@ -1061,20 +1217,30 @@ export function actionsFromToolCalls(raw: ToolCallFileAction | ToolCallFileActio
     if (!path || !operation || !isPathShapeSafe(path)) continue;
 
     const opUpper = operation.toUpperCase();
-    if (!['CREATE', 'MODIFY', 'DELETE', 'READ'].includes(opUpper)) continue;
+    if (!['CREATE', 'MODIFY', 'DELETE', 'READ', 'PATCH'].includes(opUpper)) continue;
 
     const description = typeof entry.description === 'string' && entry.description.trim()
       ? entry.description.trim()
       : `${opUpper} ${path}`;
 
-    actions.push({
+    const oldText = typeof entry.old === 'string' ? entry.old : undefined;
+    const newText = typeof entry.new === 'string' ? entry.new : undefined;
+    if (opUpper === 'PATCH' && (oldText === undefined || newText === undefined)) continue;
+
+    const action: FileAction = {
       path,
       operation: opUpper as FileAction['operation'],
       intent: resolveActionIntent(opUpper, entry.intent),
       contentHash: typeof entry.contentHash === 'string' ? entry.contentHash : undefined,
       description,
       content: typeof entry.content === 'string' ? entry.content : undefined,
-    });
+    };
+    if (oldText !== undefined) action.old = oldText;
+    if (newText !== undefined) action.new = newText;
+    if (typeof entry.beforeHash === 'string' && entry.beforeHash.trim()) {
+      action.beforeHash = entry.beforeHash.trim().toLowerCase();
+    }
+    actions.push(action);
   }
 
   return actions;
