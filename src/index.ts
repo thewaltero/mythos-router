@@ -319,6 +319,10 @@ export {
   type JsonRpcResponse,
   type JsonRpcSuccessResponse,
   type JsonRpcErrorResponse,
+  type JsonRpcNotification,
+  type ProgressToken,
+  type ProgressReporter,
+  type HandleMCPMessageOptions,
 } from './mcp.js';
 export {
   MCP_CONFIG_CLIENTS,

@@ -67,10 +67,20 @@ describe('MCP adapter', () => {
     assert.ok(names.includes('receipts_list'));
     assert.ok(names.includes('receipts_show'));
     assert.ok(names.includes('receipts_verify'));
+    assert.ok(names.includes('receipts_undo'));
     assert.ok(names.includes('skills_list'));
+    assert.ok(names.includes('skills_check'));
+    assert.ok(names.includes('skills_suggest'));
+    assert.ok(names.includes('doctor'));
+    assert.ok(names.includes('policy_suggest'));
+    assert.ok(names.includes('runs_list'));
+    assert.ok(names.includes('runs_show'));
     assert.equal(tools.find((tool) => tool.name === 'swd_dry_run')?.annotations?.readOnlyHint, true);
     assert.equal(tools.find((tool) => tool.name === 'swd_validate')?.annotations?.readOnlyHint, true);
     assert.equal(tools.find((tool) => tool.name === 'swd_apply')?.annotations?.destructiveHint, true);
+    assert.equal(tools.find((tool) => tool.name === 'receipts_undo')?.annotations?.destructiveHint, true);
+    assert.equal(tools.find((tool) => tool.name === 'policy_suggest')?.annotations?.readOnlyHint, true);
+    assert.equal(tools.find((tool) => tool.name === 'runs_list')?.annotations?.readOnlyHint, true);
   });
 
   it('validates external actions through MCP without writing files', async () => {
@@ -225,3 +235,231 @@ describe('MCP adapter', () => {
     });
   });
 });
+
+  it('doctor inspects workspace health without repair by default', async () => {
+    await withTempProject('mythos-mcp-doctor-', async () => {
+      const response = await handleMCPMessage({
+        jsonrpc: '2.0',
+        id: 50,
+        method: 'tools/call',
+        params: { name: 'doctor', arguments: {} },
+      });
+
+      assert.ok(response && 'result' in response);
+      const structured = response.result.structuredContent as {
+        ok: boolean;
+        report: { tool: string; repairRequested: boolean; checks: unknown[] };
+      };
+      assert.equal(structured.report.tool, 'mythos-doctor');
+      assert.equal(structured.report.repairRequested, false);
+      assert.ok(Array.isArray(structured.report.checks));
+      assert.ok(structured.report.checks.length > 0);
+    });
+  });
+
+  it('policy_suggest returns a read-only suggestion payload', async () => {
+    await withTempProject('mythos-mcp-policy-', async () => {
+      const response = await handleMCPMessage({
+        jsonrpc: '2.0',
+        id: 51,
+        method: 'tools/call',
+        params: { name: 'policy_suggest', arguments: {} },
+      });
+
+      assert.ok(response && 'result' in response);
+      assert.equal(response.result.isError, false);
+      const structured = response.result.structuredContent as {
+        ok: boolean;
+        result: { suggestions: unknown[]; policyPatch: unknown };
+      };
+      assert.equal(structured.ok, true);
+      assert.ok(Array.isArray(structured.result.suggestions));
+      assert.ok(structured.result.policyPatch);
+    });
+  });
+
+  it('runs_list and runs_show handle an empty run ledger', async () => {
+    await withTempProject('mythos-mcp-runs-', async () => {
+      const listResponse = await handleMCPMessage({
+        jsonrpc: '2.0',
+        id: 52,
+        method: 'tools/call',
+        params: { name: 'runs_list', arguments: { limit: 5 } },
+      });
+      assert.ok(listResponse && 'result' in listResponse);
+      assert.equal(listResponse.result.isError, false);
+      const listStructured = listResponse.result.structuredContent as { ok: boolean; runs: unknown[] };
+      assert.equal(listStructured.ok, true);
+      assert.deepEqual(listStructured.runs, []);
+
+      const showResponse = await handleMCPMessage({
+        jsonrpc: '2.0',
+        id: 53,
+        method: 'tools/call',
+        params: { name: 'runs_show', arguments: { target: 'latest' } },
+      });
+      assert.ok(showResponse && 'result' in showResponse);
+      assert.equal(showResponse.result.isError, true);
+      const showStructured = showResponse.result.structuredContent as { ok: boolean; error: string };
+      assert.equal(showStructured.ok, false);
+      assert.match(showStructured.error, /Run not found/i);
+    });
+  });
+
+  it('receipts_undo previews by default and does not apply', async () => {
+    await withTempProject('mythos-mcp-undo-', async () => {
+      const receipt = createSWDReceipt({
+        request: 'create then undo preview',
+        summary: 'CREATE: preview.txt',
+        provider: { providerId: 'external:mcp-agent', modelId: 'manual' },
+        result: {
+          success: true,
+          rolledBack: false,
+          rollbackErrors: [],
+          errors: [],
+          results: [
+            {
+              action: {
+                path: 'preview.txt',
+                operation: 'CREATE',
+                intent: 'MUTATE',
+                description: 'Create preview file',
+              },
+              status: 'verified',
+              detail: 'Verified: CREATE preview.txt',
+              after: {
+                path: 'preview.txt',
+                exists: true,
+                size: 4,
+                mtime: Date.now(),
+                hash: 'a'.repeat(64),
+              },
+            },
+          ],
+        },
+      });
+      saveSWDReceipt(receipt);
+
+      const response = await handleMCPMessage({
+        jsonrpc: '2.0',
+        id: 54,
+        method: 'tools/call',
+        params: {
+          name: 'receipts_undo',
+          arguments: { target: receipt.id },
+        },
+      });
+
+      assert.ok(response && 'result' in response);
+      const structured = response.result.structuredContent as {
+        ok: boolean;
+        applied: boolean;
+        plan: { receiptId: string; items: unknown[] };
+      };
+      assert.equal(structured.applied, false);
+      assert.equal(structured.plan.receiptId, receipt.id);
+      assert.ok(Array.isArray(structured.plan.items));
+    });
+  });
+
+  it('skills_suggest returns analysis without writing by default', async () => {
+    await withTempProject('mythos-mcp-skills-suggest-', async () => {
+      const response = await handleMCPMessage({
+        jsonrpc: '2.0',
+        id: 55,
+        method: 'tools/call',
+        params: {
+          name: 'skills_suggest',
+          arguments: { limit: 10, minOccurrences: 2 },
+        },
+      });
+
+      assert.ok(response && 'result' in response);
+      assert.equal(response.result.isError, false);
+      const structured = response.result.structuredContent as {
+        ok: boolean;
+        written: null;
+        result: { rules: unknown[] };
+      };
+      assert.equal(structured.ok, true);
+      assert.equal(structured.written, null);
+      assert.ok(Array.isArray(structured.result.rules));
+    });
+  });
+
+  it('streams notifications/progress when tools/call includes progressToken', async () => {
+    await withTempProject('mythos-mcp-progress-', async () => {
+      const notifications: Array<{ method: string; params?: Record<string, unknown> }> = [];
+
+      const response = await handleMCPMessage(
+        {
+          jsonrpc: '2.0',
+          id: 90,
+          method: 'tools/call',
+          params: {
+            name: 'swd_dry_run',
+            arguments: {
+              actions: [
+                {
+                  path: 'streamed.txt',
+                  operation: 'CREATE',
+                  intent: 'MUTATE',
+                  description: 'Progress streaming dry-run',
+                  content: 'stream me\n',
+                },
+              ],
+            },
+            _meta: { progressToken: 'tok-stream-1' },
+          },
+        },
+        undefined,
+        {
+          onNotification: (notification) => {
+            notifications.push({
+              method: notification.method,
+              params: notification.params,
+            });
+          },
+        },
+      );
+
+      assert.ok(response && 'result' in response);
+      assert.equal(response.result.isError, false);
+      assert.ok(notifications.length >= 2, `expected progress notifications, got ${notifications.length}`);
+      for (const note of notifications) {
+        assert.equal(note.method, 'notifications/progress');
+        assert.equal(note.params?.progressToken, 'tok-stream-1');
+        assert.equal(typeof note.params?.progress, 'number');
+        assert.equal(note.params?.total, 100);
+      }
+      const last = notifications[notifications.length - 1]!;
+      assert.equal(last.params?.progress, 100);
+    });
+  });
+
+  it('does not emit progress notifications without a progressToken', async () => {
+    await withTempProject('mythos-mcp-no-progress-', async () => {
+      const notifications: unknown[] = [];
+      const response = await handleMCPMessage(
+        {
+          jsonrpc: '2.0',
+          id: 91,
+          method: 'tools/call',
+          params: {
+            name: 'skills_list',
+            arguments: {},
+          },
+        },
+        undefined,
+        {
+          onNotification: (notification) => {
+            notifications.push(notification);
+          },
+        },
+      );
+
+      assert.ok(response && 'result' in response);
+      assert.equal(response.result.isError, false);
+      assert.equal(notifications.length, 0);
+    });
+  });
