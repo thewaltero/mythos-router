@@ -83,7 +83,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
-    "commander": "^14.0.3"
+    "commander": "^15.1.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
